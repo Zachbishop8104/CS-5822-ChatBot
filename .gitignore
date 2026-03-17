@@ -1,4 +1,7 @@
-/data
-__pycache__
-/raw_text
-/tokenizer
+data/
+__pycache__/
+raw_text/
+tokenizer/
+tokens/
+model_state/
+.vscode/

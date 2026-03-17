@@ -59,7 +59,8 @@ def dump_texts(n_samples: int = 10_000):
 
         log.info(f"Saved {count} samples → {out_path}")
 
-# Train BPE tokenizer
+# Train Byte Pair Encoding tokenizer
+# using huggingface tokenizers library
 def train(vocab_size: int = 8000):
     txt_files = list(RAW_TEXT_DIR.rglob("*.txt"))
     if not txt_files:
@@ -80,26 +81,26 @@ def train(vocab_size: int = 8000):
 
     tokenizer.train([str(f) for f in txt_files], trainer)
     tokenizer.save(str(TOKENIZER_PATH))
-    log.info(f"Tokenizer saved → {TOKENIZER_PATH}  (vocab_size={tokenizer.get_vocab_size()})")
+    log.info(f"Tokenizer saved: {TOKENIZER_PATH}  (vocab_size={tokenizer.get_vocab_size()})")
 
 
 # Load helper
 def load() -> Tokenizer:
     """Load the tokenizer from disk."""
-    tok = Tokenizer.from_file(str(TOKENIZER_PATH))
-    log.info(f"Loaded tokenizer from {TOKENIZER_PATH} (vocab_size={tok.get_vocab_size()})")
-    return tok
+    tokenizer = Tokenizer.from_file(str(TOKENIZER_PATH))
+    log.info(f"Loaded tokenizer from: {TOKENIZER_PATH} (vocab_size={tokenizer.get_vocab_size()})")
+    return tokenizer
 
 
 # CLI
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dump",       action="store_true", help="Dump raw text from HuggingFace")
-    parser.add_argument("--train",      action="store_true", help="Train the tokenizer")
-    parser.add_argument("--test",       action="store_true", help="Test the tokenizer")
+    parser.add_argument("--dump", action="store_true", help="Dump raw text from HuggingFace")
+    parser.add_argument("--train", action="store_true", help="Train the tokenizer")
+    parser.add_argument("--test", action="store_true", help="Test the tokenizer")
     parser.add_argument("--vocab_size", type=int, default=8000)
-    parser.add_argument("--n_samples",  type=int, default=10_000)
-    parser.add_argument("--text",       default="What is photosynthesis and how does it work?")
+    parser.add_argument("--n_samples", type=int, default=10_000)
+    parser.add_argument("--text", default="What is photosynthesis and how does it work?")
     args = parser.parse_args()
 
     if args.dump:
@@ -109,10 +110,10 @@ if __name__ == "__main__":
         train(args.vocab_size)
 
     if args.test:
-        tok = load()
-        ids = tok.encode(args.text).ids
-        decoded = tok.decode(ids)
-        print(f"\nInput:   {args.text}")
-        print(f"Tokens:  {ids}")
+        tokenizer = load()
+        ids = tokenizer.encode(args.text).ids
+        decoded = tokenizer.decode(ids)
+        print(f"\nInput: {args.text}")
+        print(f"Tokens: {ids}")
         print(f"Decoded: {decoded}")
-        print(f"Vocab size: {tok.get_vocab_size()}")
+        print(f"Vocab size: {tokenizer.get_vocab_size()}")
