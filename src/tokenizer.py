@@ -2,9 +2,9 @@
 tokenizer.py. Train and load a BPE tokenizer using HuggingFace tokenizers.
 
 Usage:
-    python tokenizer.py --dump      # step 1: pull raw text
-    python tokenizer.py --train     # step 2: train tokenizer
-    python tokenizer.py --test      # verify it works
+    python tokenizer.py --dump  --samples #        # step 1: pull raw text
+    python tokenizer.py --train --vocab_size #     # step 2: train tokenizer
+    python tokenizer.py --test                     # verify it works
 """
 
 import argparse
@@ -26,6 +26,21 @@ RAW_TEXT_DIR  = Path(__file__).parent.parent / "raw_text"
 TOKENIZER_DIR = Path(__file__).parent.parent / "tokenizer"
 TOKENIZER_PATH = TOKENIZER_DIR / "tokenizer.json"
 
+
+def _coerce_to_text(value) -> str:
+    """Normalize dataset field values into plain text for dumping."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = [str(v).strip() for v in value if v is not None and str(v).strip()]
+        return " ".join(parts).strip()
+    if isinstance(value, dict):
+        parts = [str(v).strip() for v in value.values() if v is not None and str(v).strip()]
+        return " ".join(parts).strip()
+    return str(value).strip()
+
 # Dump raw text to disk
 def dump_texts(n_samples: int = 10_000):
     """Save data from HuggingFace datasets as raw text files in raw_text/."""
@@ -35,7 +50,10 @@ def dump_texts(n_samples: int = 10_000):
     sources = [
         # (dataset_name, config, split, text_field)
         ("wikipedia", "20220301.en", "train", "text"),
-        ("squad_v2",  None,          "train", "context"),
+        ("squad_v2", None, "train", "context"), # Stanford Question Answering Dataset
+        ("scientific_papers",  "arxiv",       "train", "abstract"),
+        ("openbookqa",         "main",        "train", "question_stem"),
+        ("blended_skill_talk", None,          "train", "previous_utterance"),
     ]
 
     for name, config, split, field in sources:
@@ -50,7 +68,7 @@ def dump_texts(n_samples: int = 10_000):
         count = 0
         with open(out_path, "w", encoding="utf-8") as f:
             for ex in ds:
-                text = ex.get(field, "").strip()
+                text = _coerce_to_text(ex.get(field, ""))
                 if text:
                     f.write(text + "\n\n")
                     count += 1
