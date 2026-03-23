@@ -7,3 +7,6 @@ run commands
 1. python tokenizer.py
 2. python data.py
 3. python train.py
+
+when in the google cloud run
+source ~/venv/bin/activate

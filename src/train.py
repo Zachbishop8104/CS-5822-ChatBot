@@ -36,7 +36,6 @@ def train_model():
     
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50_000)
     tokens = load_tokens(max_tokens=args.max_tokens)
     train_tokens, val_tokens = split_tokens(tokens)
 
@@ -44,7 +43,7 @@ def train_model():
     steps = 50_000
 
     for step in range(steps):
-        input_batch, targets = get_batch(train_tokens, batch_size=64, seq_len=512)
+        input_batch, targets = get_batch(train_tokens, batch_size=32, seq_len=512)
         input_batch = input_batch.to(device)
         targets = targets.to(device)
 
@@ -55,8 +54,7 @@ def train_model():
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
-        scheduler.step()
-        
+
         if step % 100 == 0:
             val_loss = evaluate(model, val_tokens, loss_fn, device, vocab_size)
             print(f"Step {step:5d} | Train Loss: {loss.item():.4f} | Val Loss: {val_loss:.4f}")

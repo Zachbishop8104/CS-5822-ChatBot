@@ -1,3 +1,7 @@
+# So at this point the model has learned how to predict the next token in general
+# but it has no idea that it is a chat bot or how to answer questions.
+# This file will finetune the model on a smaller dataset of Q&A pairs to teach it how to answer questions.
+
 import torch
 import torch.nn as nn
 from model import Model
