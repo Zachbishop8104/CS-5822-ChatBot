@@ -74,26 +74,29 @@ class FeedForward(nn.Module):
 # x -> LayerNorm -> Attention -> add input back
 # x -> LayerNorm -> FeedForward -> add input back
 class TransformerBlock(nn.Module):
-    def __init__(self, embed_dim, num_heads):
+    def __init__(self, embed_dim, num_heads, dropout=0.1):
         super().__init__()
         self.attention = MultiHeadAttention(embed_dim, num_heads)
         self.feed_forward = FeedForward(embed_dim)
         self.norm1 = nn.LayerNorm(embed_dim)
         self.norm2 = nn.LayerNorm(embed_dim)
+        
+        # Stop the model from overfitting
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        x = x + self.attention(self.norm1(x))
-        x = x + self.feed_forward(self.norm2(x))
+        x = x + self.dropout(self.attention(self.norm1(x)))
+        x = x + self.dropout(self.feed_forward(self.norm2(x)))
         return x
 
 class Model(nn.Module):
-    def __init__(self, vocab_size, embed_dim=512, num_heads=8, num_layers=6):
+    def __init__(self, vocab_size, embed_dim=512, num_heads=8, num_layers=6, dropout=0.1):
         super().__init__()
         self.embedding = Embedding(vocab_size, embed_dim)
         self.positional_encoding = PositionalEncoding(embed_dim)
         
         self.blocks = nn.ModuleList([
-            TransformerBlock(embed_dim, num_heads)
+            TransformerBlock(embed_dim, num_heads, dropout)
             for _ in range(num_layers)
         ])
         

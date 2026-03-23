@@ -4,7 +4,7 @@ from pathlib import Path
 
 TOKENS_DIR = Path(__file__).parent.parent / "tokens"
 
-def load_tokens(split="train"):
+def load_tokens(max_tokens=None):
     bin_files = list(TOKENS_DIR.rglob("*.bin"))
     if not bin_files:
         raise FileNotFoundError(f"No .bin files found in {TOKENS_DIR}")
@@ -13,11 +13,17 @@ def load_tokens(split="train"):
     for file in bin_files:
         tokens = np.fromfile(file, dtype=np.uint16).astype(np.int64)
         all_tokens.append(tokens)
-        
-    return np.concatenate(all_tokens)
-
-tokens = load_tokens()
-print(f"Total tokens loaded: {len(tokens):,}")
+    
+    combined = np.concatenate(all_tokens)
+    
+    if max_tokens:
+        combined = combined[:max_tokens]
+    
+    # in place shuffle to avoid extra memory copies
+    np.random.shuffle(combined)
+    
+    print(f"Total tokens loaded: {len(combined):,}")
+    return combined
 
 def get_batch(tokens, batch_size=8, seq_len=128):
     # pick random starting positions
@@ -25,8 +31,8 @@ def get_batch(tokens, batch_size=8, seq_len=128):
     
     # create input and target batches
     # the target is the goal, since it is shifted by one token, our model will learn to predict the next token
-    input_batch = torch.stack([torch.from_numpy(tokens[i:i+seq_len].copy()) for i in indices])
-    target_batch = torch.stack([torch.from_numpy(tokens[i+1:i+seq_len+1].copy()) for i in indices])
+    input_batch = torch.stack([torch.from_numpy(tokens[i:i+seq_len].copy()).long() for i in indices])
+    target_batch = torch.stack([torch.from_numpy(tokens[i+1:i+seq_len+1].copy()).long() for i in indices])
     
     return input_batch, target_batch
 

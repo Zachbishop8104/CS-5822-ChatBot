@@ -1,3 +1,9 @@
 AI Study Companion with Class-Specific Knowledge
 
 This is basically a mini retrieval-augmented chatbot so far
+
+instructions
+run commands
+1. python tokenizer.py
+2. python data.py
+3. python train.py
