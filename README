@@ -3,6 +3,8 @@ AI Study Companion with Class-Specific Knowledge
 This is basically a mini retrieval-augmented chatbot so far
 
 instructions
+Set Hugging face access token in the .env if you are loading data. This is not required but will speed things up.
+
 run commands
 1. python tokenizer.py
 2. python data.py
@@ -10,3 +12,9 @@ run commands
 
 when in the google cloud run
 source ~/venv/bin/activate
+
+run the training in the background while cd in the src folder
+cd ~/CS-5822-ChatBot/src
+
+outputs to a training log that can be viewed use training.log in the args
+nohup python -u train.py --force --max_tokens 400_000_000 > ../training.log 2>&1 &

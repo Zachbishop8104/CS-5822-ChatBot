@@ -5,3 +5,5 @@ tokenizer/
 tokens/
 model_state/
 .vscode/
+training.log
+.env

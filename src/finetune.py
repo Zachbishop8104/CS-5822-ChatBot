@@ -8,6 +8,7 @@ from model import Model
 from tokenizer import load
 from pathlib import Path
 import numpy as np
+import argparse
 
 MODEL_DIR = Path(__file__).parent.parent / "model_state"
 QA_PATH = Path(__file__).parent.parent / "raw_text" / "qa" / "squad.txt"
@@ -31,18 +32,18 @@ def get_batch(tokens, batch_size=32, seq_len=256):
     target_batch = torch.stack([torch.from_numpy(tokens[i+1:i+seq_len+1].astype(np.int64)) for i in indices])
     return input_batch, target_batch
 
-def finetune():
-    vocab_size = 8000
+def finetune(model_file_name):
+    vocab_size = 16000
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # load pretrained model
-    model = Model(vocab_size, embed_dim=256, num_heads=4, num_layers=4, dropout=0.3)
-    checkpoint = torch.load(MODEL_DIR / "Model.pth")
+    # must match the architecture of the pretrained model
+    model = Model(vocab_size=16000, embed_dim=768, num_heads=12, num_layers=8, dropout=0.1)
+    checkpoint = torch.load(MODEL_DIR / model_file_name, weights_only=True)
     model.load_state_dict(checkpoint["model"])
     model.to(device)
 
-    # lower learning rate for fine-tuning so we don't overwrite what was learned
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
+    # lower learning rate for fine-tuning
+    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-6)
     loss_fn = nn.CrossEntropyLoss()
 
     print("Loading Q&A tokens...")
@@ -63,11 +64,6 @@ def finetune():
 
         if step % 500 == 0:
             print(f"Step {step:4d} | Loss: {loss.item():.4f}")
-            
-        # stop early if loss gets too low. Overfitting things
-        if loss.item() < 0.5:
-            print(f"Early stop at step {step} — loss {loss.item():.4f}")
-            break
 
     torch.save(
         {"model": model.state_dict(), "optimizer": optimizer.state_dict()},
@@ -76,4 +72,11 @@ def finetune():
     print("Saved finetuned model as Model_finetuned.pth")
 
 if __name__ == "__main__":
-    finetune()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_file_name")
+    args = parser.parse_args()
+
+    if args.model_file_name:
+        finetune(args.model_file_name)
+    else:
+        print("No model file name provided. Use --model_file_name to specify the pretrained model to finetune.")

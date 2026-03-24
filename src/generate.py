@@ -3,12 +3,12 @@ from model import Model
 from tokenizer import load
 from pathlib import Path
 
-MODEL_PATH = Path(__file__).parent.parent / "model_state" / "Model.pth"
+MODEL_PATH = Path(__file__).parent.parent / "model_state" / "Model_finetuned.pth"
 
 def generate(prompt, max_new_tokens=100, temperature=0.8):
     tok = load()
-    model = Model(vocab_size=16000, embed_dim=512, num_heads=8, num_layers=6, dropout=0.1)
-    checkpoint = torch.load(MODEL_PATH)
+    model = Model(vocab_size=16000, embed_dim=768, num_heads=12, num_layers=8, dropout=0.1)
+    checkpoint = torch.load(MODEL_PATH, weights_only=True)
     model.load_state_dict(checkpoint["model"])
     model.eval()
 

@@ -9,13 +9,21 @@ Usage:
 
 import argparse
 import logging
+import os
 from pathlib import Path
-
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
-from tokenizers.pre_tokenizers import Whitespace
+from tokenizers.pre_tokenizers import Whitespace, Punctuation, Sequence
 from datasets import load_dataset
+from dotenv import load_dotenv
+
+load_dotenv()
+
+hf_token = os.getenv("HF_TOKEN")
+
+if hf_token:
+    os.environ["HF_TOKEN"] = hf_token
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -42,21 +50,21 @@ def _coerce_to_text(value) -> str:
     return str(value).strip()
 
 # Dump raw text to disk
-def dump_texts(n_samples: int = 10_000):
+def dump_texts():
     """Save data from HuggingFace datasets as raw text files in raw_text/."""
     output_dir = RAW_TEXT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
 
     sources = [
-        # (dataset_name, config, split, text_field)
-        ("wikipedia", "20220301.en", "train", "text"),
-        ("squad_v2", None, "train", "context"), # Stanford Question Answering Dataset
-        ("scientific_papers",  "arxiv",       "train", "abstract"),
-        ("openbookqa",         "main",        "train", "question_stem"),
-        ("blended_skill_talk", None,          "train", "previous_utterance"),
+        # (dataset_name, config, split, text_field, samples)
+        ("wikimedia/wikipedia", "20231101.en", "train", "text", 300_000),
+        # ("squad_v2", None, "train", "context"), # Stanford Question Answering Dataset
+        # ("scientific_papers", "arxiv", "train", "abstract"),
+        # ("openbookqa", "main", "train", "question_stem"),
+        ("HuggingFaceTB/cosmopedia", "stanford", "train", "text", 100_000),
     ]
 
-    for name, config, split, field in sources:
+    for name, config, split, field, n_samples in sources:
         log.info(f"Dumping {n_samples} samples from {name}...")
         kwargs = {"streaming": True}
         if config:
@@ -88,7 +96,7 @@ def train(vocab_size: int = 8000):
     log.info(f"Training on {len(txt_files)} file(s) with vocab_size={vocab_size}")
 
     tokenizer = Tokenizer(BPE(unk_token="[UNK]"))
-    tokenizer.pre_tokenizer = Whitespace()
+    tokenizer.pre_tokenizer = Sequence([Whitespace(), Punctuation()])
 
     trainer = BpeTrainer(
         vocab_size=vocab_size,
@@ -117,12 +125,12 @@ if __name__ == "__main__":
     parser.add_argument("--train", action="store_true", help="Train the tokenizer")
     parser.add_argument("--test", action="store_true", help="Test the tokenizer")
     parser.add_argument("--vocab_size", type=int, default=8000)
-    parser.add_argument("--n_samples", type=int, default=10_000)
+    # parser.add_argument("--n_samples", type=int, default=10_000)
     parser.add_argument("--text", default="What is photosynthesis and how does it work?")
     args = parser.parse_args()
 
     if args.dump:
-        dump_texts(args.n_samples)
+        dump_texts()
 
     if args.train:
         train(args.vocab_size)

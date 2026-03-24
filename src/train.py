@@ -10,6 +10,7 @@ import torch.nn as nn
 from model import Model
 from dataloader import load_tokens, get_batch, split_tokens
 from pathlib import Path
+from torch import amp
 
 MODEL_DIR = Path(__file__).parent.parent / "model_state"
 
@@ -19,8 +20,8 @@ def evaluate(model, val_tokens, loss_fn, device, vocab_size, steps=20):
     with torch.no_grad():
         for _ in range(steps):
             input_batch, targets = get_batch(val_tokens)
-            input_batch = input_batch.to(device)
-            targets = targets.to(device)
+            input_batch = input_batch.to(device, non_blocking=True)
+            targets = targets.to(device, non_blocking=True)
             logits = model(input_batch)
             loss = loss_fn(logits.view(-1, vocab_size), targets.view(-1))
             total_loss += loss.item()
@@ -28,32 +29,42 @@ def evaluate(model, val_tokens, loss_fn, device, vocab_size, steps=20):
     return total_loss / steps
 
 def train_model():
+    steps = 100_000
     vocab_size = 16000
-    model = Model(vocab_size=16000, embed_dim=512, num_heads=8, num_layers=6, dropout=0.1)
+    model = Model(vocab_size=16000, embed_dim=768, num_heads=12, num_layers=8, dropout=0.1)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-5)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=steps)
+    scaler = amp.GradScaler()
     tokens = load_tokens(max_tokens=args.max_tokens)
     train_tokens, val_tokens = split_tokens(tokens)
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    steps = 50_000
 
     for step in range(steps):
         input_batch, targets = get_batch(train_tokens, batch_size=32, seq_len=512)
-        input_batch = input_batch.to(device)
-        targets = targets.to(device)
+        input_batch = input_batch.to(device, non_blocking=True)
+        targets = targets.to(device, non_blocking=True)
 
-        logits = model(input_batch)
-        loss = loss_fn(logits.view(-1, vocab_size), targets.view(-1))
+        with amp.autocast(device_type=device.type):
+            logits = model(input_batch)
+            loss = loss_fn(logits.view(-1, vocab_size), targets.view(-1))
 
         optimizer.zero_grad()
-        loss.backward()
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
+        scheduler.step()
+
+        # if loss.item() < 0.8 and val_loss > loss.item() * 1.5:
+        #     print(f"Early stop at step {step} — possible overfitting")
+        #     break
 
         if step % 100 == 0:
             val_loss = evaluate(model, val_tokens, loss_fn, device, vocab_size)
