@@ -39,7 +39,8 @@ def loadBins(file_name=None):
                         encodings = tok.encode_batch(batch)
 
                         for enc in encodings:
-                            buffer.extend(enc.ids)
+                            ids = [BOS_ID] + enc.ids + [EOS_ID]
+                            buffer.extend(ids)
 
                         batch = []
 
@@ -48,7 +49,7 @@ def loadBins(file_name=None):
                         out_file.write(arr.tobytes())
                         total += len(buffer)
                         buffer = []
-                        print(f"  {txt_file.name}: {total:,} tokens written...", end="\r")
+                        print(f"{txt_file.name}: {total:,} tokens written...", end="\r")
 
                 # process leftover batch
                 if batch:
@@ -57,6 +58,12 @@ def loadBins(file_name=None):
                         ids = enc.ids
                         ids = [BOS_ID] + ids + [EOS_ID]
                         buffer.extend(ids)
+
+                if buffer:
+                    arr = np.array(buffer, dtype=np.uint16)
+                    out_file.write(arr.tobytes())
+                    total += len(buffer)
+                    buffer = []
 
         print(f"\n{txt_file.name} -> {total:,} tokens saved")
         

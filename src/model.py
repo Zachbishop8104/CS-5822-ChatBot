@@ -35,6 +35,12 @@ class AttentionHead(nn.Module):
         K = self.k(x)
         V = self.v(x)
         scores = (Q @ K.transpose(-2, -1)) * self.scale
+        seq_len = x.size(1)
+        causal_mask = torch.triu(
+            torch.ones(seq_len, seq_len, device=x.device, dtype=torch.bool),
+            diagonal=1,
+        )
+        scores = scores.masked_fill(causal_mask, float("-inf"))
         weights = torch.softmax(scores, dim=-1)
         return weights @ V
 
@@ -64,7 +70,7 @@ class FeedForward(nn.Module):
         # before compressing it back down
         self.net = nn.Sequential(
             nn.Linear(embed_dim, embed_dim * 4),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(embed_dim * 4, embed_dim)
         )
         
@@ -111,11 +117,3 @@ class Model(nn.Module):
             
         x = self.norm(x)
         return self.output_projection(x)
-
-if __name__ == "__main__":
-    vocab_size = 8000
-    model = Model(vocab_size)
-
-    x = torch.tensor([[43, 76, 6135]])
-    out = model(x)
-    print(out.shape)  # should print torch.Size([1, 3, 8000])

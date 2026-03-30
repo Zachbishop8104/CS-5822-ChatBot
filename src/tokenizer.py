@@ -15,6 +15,7 @@ from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
 from tokenizers.pre_tokenizers import Whitespace, Punctuation, Sequence
+from tokenizers.decoders import BPEDecoder
 from datasets import load_dataset
 from dotenv import load_dotenv
 
@@ -55,13 +56,15 @@ def dump_texts():
     output_dir = RAW_TEXT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Sources: (dataset_name, config, split, text_field, samples)
     sources = [
-        # (dataset_name, config, split, text_field, samples)
-        ("wikimedia/wikipedia", "20231101.en", "train", "text", 300_000),
-        # ("squad_v2", None, "train", "context"), # Stanford Question Answering Dataset
-        # ("scientific_papers", "arxiv", "train", "abstract"),
-        # ("openbookqa", "main", "train", "question_stem"),
-        ("HuggingFaceTB/cosmopedia", "stanford", "train", "text", 100_000),
+        # ("wikimedia/wikipedia", "20231101.en", "train", "text", 3_000_000),
+        # ("HuggingFaceTB/cosmopedia", "stanford", "train", "text", 500_000),
+        # ("squad_v2", None, "train", "context", 100_000),
+        # ("zelalt/scientific-papers", None, "train", "full_text", 200_000),
+        # ("sci-datasets/sci-papers", None, "train", "text", 500_000),
+        # ("openwebtext", None, "train", "text", 1_000_000),
+        ("cc_news", None, "train", "text", 500_000),
     ]
 
     for name, config, split, field, n_samples in sources:
@@ -87,7 +90,15 @@ def dump_texts():
 
 # Train Byte Pair Encoding tokenizer
 # using huggingface tokenizers library
-def train(vocab_size: int = 8000):
+# This takes an hour or two
+def train(vocab_size: int = 8000, log_every: int = 1_000_000):
+    """
+    Train a BPE tokenizer on the dumped raw text files.
+
+    Args:
+        vocab_size (int): target vocabulary size
+        log_every (int): log a message every `log_every` lines processed
+    """
     txt_files = list(RAW_TEXT_DIR.rglob("*.txt"))
     if not txt_files:
         raise FileNotFoundError(f"No .txt files found in {RAW_TEXT_DIR}. Run --dump first.")
@@ -95,17 +106,29 @@ def train(vocab_size: int = 8000):
     TOKENIZER_DIR.mkdir(parents=True, exist_ok=True)
     log.info(f"Training on {len(txt_files)} file(s) with vocab_size={vocab_size}")
 
-    tokenizer = Tokenizer(BPE(unk_token="[UNK]"))
+    tokenizer = Tokenizer(BPE(unk_token="[UNK]", end_of_word_suffix="</w>"))
     tokenizer.pre_tokenizer = Sequence([Whitespace(), Punctuation()])
 
     trainer = BpeTrainer(
         vocab_size=vocab_size,
         min_frequency=2,
+        end_of_word_suffix="</w>",
         special_tokens=SPECIAL_TOKENS,
-        show_progress=True,
+        show_progress=False,
     )
 
-    tokenizer.train([str(f) for f in txt_files], trainer)
+    def file_generator(files):
+        for f_idx, f in enumerate(files, start=1):
+            with open(f, "r", encoding="utf-8") as fh:
+                for i, line in enumerate(fh, start=1):
+                    if i % log_every == 0:
+                        log.info(f"File {f_idx}/{len(files)}: processed {i:,} lines from {f.name}")
+                    yield line
+    lines_iter = file_generator(txt_files)
+
+    tokenizer.train_from_iterator(lines_iter, trainer=trainer)
+    # Match decode behavior to BPE end-of-word markers to restore spaces.
+    tokenizer.decoder = BPEDecoder(suffix="</w>")
     tokenizer.save(str(TOKENIZER_PATH))
     log.info(f"Tokenizer saved: {TOKENIZER_PATH}  (vocab_size={tokenizer.get_vocab_size()})")
 
@@ -124,8 +147,7 @@ if __name__ == "__main__":
     parser.add_argument("--dump", action="store_true", help="Dump raw text from HuggingFace")
     parser.add_argument("--train", action="store_true", help="Train the tokenizer")
     parser.add_argument("--test", action="store_true", help="Test the tokenizer")
-    parser.add_argument("--vocab_size", type=int, default=8000)
-    # parser.add_argument("--n_samples", type=int, default=10_000)
+    parser.add_argument("--vocab_size", type=int, default=40_000, help="Vocabulary size for training the tokenizer")
     parser.add_argument("--text", default="What is photosynthesis and how does it work?")
     args = parser.parse_args()
 

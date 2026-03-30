@@ -14,10 +14,15 @@ def dump_qa(n_samples=50_000):
 
     with open(out_path, "w", encoding="utf-8") as f:
         for ex in ds:
+            context = ex.get("context", "").strip()
             question = ex.get("question", "").strip()
             answers  = ex.get("answers", {}).get("text", [])
-            if question and answers:
-                line = f"Question: {question}\nAnswer: {answers[0]}\n\n"
+            if context and question and answers:
+                line = (
+                    f"Context: {context}\n"
+                    f"Question: {question}\n"
+                    f"Answer: {answers[0]}\n\n"
+                )
                 f.write(line)
                 count += 1
             if count >= n_samples:

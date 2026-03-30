@@ -1,25 +1,37 @@
-# reads data, trains model
-# 1. Grab a batch of tokens from the .bin files
-# 2. Feed them into the model -> get predictions
-# 3. Compare predictions to the actual next tokens -> calculate loss
-# 4. Backpropagate the loss -> update model weights
-# 5. Repeat
 import argparse
+import math
 import torch
 import torch.nn as nn
 from model import Model
-from dataloader import load_tokens, get_batch, split_tokens
+from dataloader import batch_generator
 from pathlib import Path
 from torch import amp
+from tokenizer import load
+from torch.optim.lr_scheduler import LambdaLR
 
 MODEL_DIR = Path(__file__).parent.parent / "model_state"
 
-def evaluate(model, val_tokens, loss_fn, device, vocab_size, steps=20):
+STEPS = 100_000
+BATCH_SIZE = 32
+SEQ_LEN = 384
+LEARNING_RATE = 3e-4
+WEIGHT_DECAY = 0.1
+EVAL_INTERVAL = 500
+SAVE_INTERVAL = 10_000
+WARMUP_STEPS = 2_000
+
+def lr_lambda(step):
+    if step < WARMUP_STEPS:
+        return step / WARMUP_STEPS
+    progress = (step - WARMUP_STEPS) / (STEPS - WARMUP_STEPS)
+    return 0.5 * (1 + math.cos(math.pi * progress))
+
+def evaluate(model, val_stream, loss_fn, device, vocab_size, steps=20):
     model.eval()
     total_loss = 0
     with torch.no_grad():
         for _ in range(steps):
-            input_batch, targets = get_batch(val_tokens)
+            input_batch, targets = next(val_stream)
             input_batch = input_batch.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
             logits = model(input_batch)
@@ -29,24 +41,35 @@ def evaluate(model, val_tokens, loss_fn, device, vocab_size, steps=20):
     return total_loss / steps
 
 def train_model():
-    steps = 100_000
-    vocab_size = 16000
-    model = Model(vocab_size=16000, embed_dim=768, num_heads=12, num_layers=8, dropout=0.1)
-    
+    tok = load()
+    vocab_size = tok.get_vocab_size()
+    model = Model(vocab_size=vocab_size, embed_dim=768, num_heads=12, num_layers=8, dropout=0.1)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
-    
+
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-5)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=steps)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    scheduler = LambdaLR(optimizer, lr_lambda)
     scaler = amp.GradScaler()
-    tokens = load_tokens(max_tokens=args.max_tokens)
-    train_tokens, val_tokens = split_tokens(tokens)
+
+    train_stream = batch_generator(batch_size=BATCH_SIZE, seq_len=SEQ_LEN, split="train")
+    val_stream = batch_generator(batch_size=BATCH_SIZE, seq_len=SEQ_LEN, split="val")
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    tokens_per_step = BATCH_SIZE * SEQ_LEN
+    total_tokens = STEPS * tokens_per_step
+    print(
+        f"Training config | steps={STEPS:,} batch_size={BATCH_SIZE} seq_len={SEQ_LEN} "
+        f"lr={LEARNING_RATE:.2e} weight_decay={WEIGHT_DECAY} "
+        f"tokens/step={tokens_per_step:,} total_tokens~={total_tokens:,}"
+    )
 
-    for step in range(steps):
-        input_batch, targets = get_batch(train_tokens, batch_size=32, seq_len=512)
+    best_val_loss = float('inf')
+    best_step = 0
+
+    for step in range(STEPS):
+        input_batch, targets = next(train_stream)
         input_batch = input_batch.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
@@ -54,7 +77,7 @@ def train_model():
             logits = model(input_batch)
             loss = loss_fn(logits.view(-1, vocab_size), targets.view(-1))
 
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -62,35 +85,58 @@ def train_model():
         scaler.update()
         scheduler.step()
 
-        # if loss.item() < 0.8 and val_loss > loss.item() * 1.5:
-        #     print(f"Early stop at step {step} — possible overfitting")
-        #     break
+        if step % EVAL_INTERVAL == 0:
+            train_loss = evaluate(model, train_stream, loss_fn, device, vocab_size)
+            val_loss = evaluate(model, val_stream, loss_fn, device, vocab_size)
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"Step {step:5d} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | LR: {current_lr:.2e}")
+            
+            # Track and save best model
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                best_step = step
+                torch.save(
+                    {
+                        "model": model.state_dict(),
+                        "optimizer": optimizer.state_dict(),
+                        "scheduler": scheduler.state_dict(),
+                        "step": step,
+                        "val_loss": val_loss,
+                    },
+                    MODEL_DIR / f"{model.__class__.__name__}_best.pth"
+                )
+                print(f"*New best val loss: {val_loss:.4f} @ step {step}")
 
-        if step % 100 == 0:
-            val_loss = evaluate(model, val_tokens, loss_fn, device, vocab_size)
-            print(f"Step {step:5d} | Train Loss: {loss.item():.4f} | Val Loss: {val_loss:.4f}")
-        
-        # save the model every 1000 steps
-        if step % 1000 == 0 and step > 0:
-            # saving by the class name in case we want to build more models with diferent versions 
+        if step % SAVE_INTERVAL == 0 and step > 0:
             torch.save(
-                {"model": model.state_dict(), "optimizer": optimizer.state_dict(), "step": step},
-                MODEL_DIR / f"{model.__class__.__name__}.pth"
+                {
+                    "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "step": step,
+                },
+                MODEL_DIR / f"{model.__class__.__name__}_ckpt_{step}.pth"
             )
-    
-    # Just in case we stop training before the next 1000 step checkpoint, save the latest model state
-    if steps % 1000 != 0:
-        torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict()}, MODEL_DIR / f"{model.__class__.__name__}.pth")
+
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "step": STEPS,
+        },
+        MODEL_DIR / f"{model.__class__.__name__}_final.pth"
+    )
+    print(f"\nTraining complete.")
+    print(f"  Best model:   {model.__class__.__name__}_best.pth (step {best_step}, val_loss {best_val_loss:.4f})")
+    print(f"  Final model:  {model.__class__.__name__}_final.pth (step {STEPS})")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true", help="Force re-training of the model")
     parser.add_argument("--model", type=str, default="Model", help="Model class name to train")
-    parser.add_argument("--max_tokens", type=int, default=50_000_000, help="Maximum number of tokens to load into RAM")
-    
     args = parser.parse_args()
-    
-    # train the model if they force it or if the model state doesn't exist yet
+
     if args.force or not (MODEL_DIR / f"{args.model}.pth").exists():
         train_model()
     else:
