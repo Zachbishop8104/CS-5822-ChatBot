@@ -1,0 +1,1 @@
+const CONFIG = { API: 'http://{server_ip}/generate' };
