@@ -1,4 +1,4 @@
-#AI Study Companion with Class-Specific Knowledge
+# AI Study Companion with Class-Specific Knowledge
 
 ## Quickstart
 
