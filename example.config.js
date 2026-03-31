@@ -1,1 +1,1 @@
-const CONFIG = { API: 'http://{server_ip}/generate' };
+const CONFIG = { API: 'http://{server_ip:port}/generate' };
