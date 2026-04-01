@@ -58,12 +58,12 @@ def dump_texts():
 
     # Sources: (dataset_name, config, split, text_field, samples)
     sources = [
-        # ("wikimedia/wikipedia", "20231101.en", "train", "text", 3_000_000),
-        # ("HuggingFaceTB/cosmopedia", "stanford", "train", "text", 500_000),
-        # ("squad_v2", None, "train", "context", 100_000),
-        # ("zelalt/scientific-papers", None, "train", "full_text", 200_000),
-        # ("sci-datasets/sci-papers", None, "train", "text", 500_000),
-        # ("openwebtext", None, "train", "text", 1_000_000),
+        ("wikimedia/wikipedia", "20231101.en", "train", "text", 3_000_000),
+        ("HuggingFaceTB/cosmopedia", "stanford", "train", "text", 500_000),
+        ("squad_v2", None, "train", "context", 100_000),
+        ("zelalt/scientific-papers", None, "train", "full_text", 200_000),
+        ("sci-datasets/sci-papers", None, "train", "text", 500_000),
+        ("openwebtext", None, "train", "text", 1_000_000),
         ("cc_news", None, "train", "text", 500_000),
     ]
 
@@ -86,7 +86,7 @@ def dump_texts():
                 if count >= n_samples:
                     break
 
-        log.info(f"Saved {count} samples → {out_path}")
+        log.info(f"Saved {count} samples -> {out_path}")
 
 # Train Byte Pair Encoding tokenizer
 # using huggingface tokenizers library

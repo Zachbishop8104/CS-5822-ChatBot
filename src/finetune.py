@@ -7,23 +7,18 @@ import torch.nn as nn
 from model import Model
 from tokenizer import load
 from pathlib import Path
+import sys
+from finetune_get_data import load_all_qa_blocks
 import numpy as np
 import argparse
 from torch import amp
+from torch.optim.lr_scheduler import LambdaLR
 
 MODEL_DIR = Path(__file__).parent.parent / "model_state"
-QA_PATH = Path(__file__).parent.parent / "raw_text" / "qa" / "squad.txt"
 
 def _load_qa_examples():
-    """Load QA blocks separated by blank lines, preserving prompt/answer format."""
-    with open(QA_PATH, "r", encoding="utf-8") as f:
-        text = f.read().strip()
-
-    if not text:
-        return []
-
-    blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
-    return blocks
+    """Load QA blocks from all .txt files in the QA folder."""
+    return load_all_qa_blocks()
 
 
 def load_qa_tokens(val_ratio=0.05):
@@ -63,7 +58,7 @@ def get_batch(tokens, batch_size=32, seq_len=256):
         )
 
     indices = torch.randint(0, len(tokens) - seq_len - 1, (batch_size,))
-    input_batch  = torch.stack([torch.from_numpy(tokens[i:i+seq_len].astype(np.int64))     for i in indices])
+    input_batch  = torch.stack([torch.from_numpy(tokens[i:i+seq_len].astype(np.int64)) for i in indices])
     target_batch = torch.stack([torch.from_numpy(tokens[i+1:i+seq_len+1].astype(np.int64)) for i in indices])
     return input_batch, target_batch
 
@@ -103,8 +98,11 @@ def finetune(model_file_name, steps=3000, batch_size=32, seq_len=256, lr=5e-6, e
     model.load_state_dict(checkpoint["model"])
     model.to(device)
 
+    WARMUP = 500
+
     # lower learning rate for fine-tuning
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    scheduler = LambdaLR(optimizer, lambda s: min(1.0, s / WARMUP))
     loss_fn = nn.CrossEntropyLoss()
     scaler = amp.GradScaler(enabled=(device.type == "cuda"))
 
@@ -126,9 +124,24 @@ def finetune(model_file_name, steps=3000, batch_size=32, seq_len=256, lr=5e-6, e
         f"batch_size={batch_size} seq_len={seq_len} lr={lr:.2e}"
     )
 
+    import os
     best_val_loss = float("inf")
     best_step = -1
-    best_output_name = "Model_finetuned_best.pth"
+    base_output_name = "Model_finetuned_best.pth"
+    def get_unique_output_path(base_name):
+        output_path = MODEL_DIR / base_name
+        if not output_path.exists():
+            return output_path
+        stem = base_name.rsplit('.', 1)[0]
+        ext = base_name.rsplit('.', 1)[1] if '.' in base_name else ''
+        i = 1
+        while True:
+            numbered = f"{stem}_{i}.{ext}" if ext else f"{stem}_{i}"
+            candidate = MODEL_DIR / numbered
+            if not candidate.exists():
+                return candidate
+            i += 1
+    best_output_path = get_unique_output_path(base_output_name)
 
     for step in range(steps):
         input_batch, targets = get_batch(train_tokens, batch_size=batch_size, seq_len=seq_len)
@@ -141,10 +154,12 @@ def finetune(model_file_name, steps=3000, batch_size=32, seq_len=256, lr=5e-6, e
 
         optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         scaler.step(optimizer)
         scaler.update()
-
+        scheduler.step()
+        
         if step % eval_interval == 0:
             val_loss = evaluate(
                 model,
@@ -161,6 +176,7 @@ def finetune(model_file_name, steps=3000, batch_size=32, seq_len=256, lr=5e-6, e
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_step = step
+                # Save to a unique file if not already saved
                 torch.save(
                     {
                         "model": model.state_dict(),
@@ -172,12 +188,12 @@ def finetune(model_file_name, steps=3000, batch_size=32, seq_len=256, lr=5e-6, e
                         "lr": lr,
                         "val_loss": val_loss,
                     },
-                    MODEL_DIR / best_output_name,
+                    best_output_path,
                 )
-                print(f"*New best val loss: {val_loss:.4f} @ step {step}")
+                print(f"*New best val loss: {val_loss:.4f} @ step {step} (saved to {best_output_path.name})")
     if best_step >= 0:
         print(
-            f"Best finetuned model: {best_output_name} "
+            f"Best finetuned model: {best_output_path.name} "
             f"(step {best_step}, val_loss {best_val_loss:.4f})"
         )
     else:
@@ -186,10 +202,10 @@ def finetune(model_file_name, steps=3000, batch_size=32, seq_len=256, lr=5e-6, e
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_file_name", default="Model_best.pth")
-    parser.add_argument("--steps", type=int, default=3000)
+    parser.add_argument("--steps", type=int, default=20000)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--seq_len", type=int, default=256)
-    parser.add_argument("--lr", type=float, default=5e-6)
+    parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--eval_interval", type=int, default=200)
     parser.add_argument("--val_ratio", type=float, default=0.05)
     args = parser.parse_args()

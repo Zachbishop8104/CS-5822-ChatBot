@@ -1,284 +1,341 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Generate</title>
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&family=Syne:wght@700;800&display=swap"
-      rel="stylesheet"
-    />
-    <script src="config.js"></script>
-    <link rel="stylesheet" href="chatbot.css">
-  </head>
-  <body>
-    <div class="app">
-      <header>
-        <div class="dot"></div>
-        <div class="title">gen<span>_</span>chat</div>
-        <div class="badge">FastAPI · /generate</div>
-      </header>
 
-      <aside>
-        <div>
-          <div class="section-title">Model</div>
-          <div class="field">
-            <label>model_file_name</label>
-            <input
-              type="text"
-              id="model_file_name"
-              value="Model_finetuned_best.pth"
-            />
-          </div>
-        </div>
-        <div>
-          <div class="section-title">Prompt extras</div>
-          <div class="field">
-            <label>context</label>
-            <input type="text" id="context" placeholder="optional context…" />
-          </div>
-          <div class="field" style="margin-top: 8px">
-            <label>instruction</label>
-            <input
-              type="text"
-              id="instruction"
-              placeholder="optional instruction…"
-            />
-          </div>
-        </div>
-        <div>
-          <div class="section-title">Sampling</div>
-          <div class="field">
-            <label>temperature</label>
-            <div class="range-row">
-              <input
-                type="range"
-                id="temperature"
-                min="0"
-                max="2"
-                step="0.05"
-                value="0.1"
-              />
-              <span class="range-val" id="temperature_val">0.10</span>
-            </div>
-          </div>
-          <div class="field" style="margin-top: 8px">
-            <label>top_k</label>
-            <div class="range-row">
-              <input
-                type="range"
-                id="top_k"
-                min="1"
-                max="100"
-                step="1"
-                value="10"
-              />
-              <span class="range-val" id="top_k_val">10</span>
-            </div>
-          </div>
-          <div class="field" style="margin-top: 8px">
-            <label>max_new_tokens</label>
-            <div class="range-row">
-              <input
-                type="range"
-                id="max_new_tokens"
-                min="10"
-                max="512"
-                step="10"
-                value="80"
-              />
-              <span class="range-val" id="max_new_tokens_val">80</span>
-            </div>
-          </div>
-        </div>
-        <div>
-          <div class="section-title">Flags</div>
-          <div class="toggle-row">
-            <span class="toggle-label">prepend_bos</span>
-            <label class="toggle"
-              ><input type="checkbox" id="prepend_bos" /><span
-                class="slider"
-              ></span
-            ></label>
-          </div>
-          <div class="toggle-row" style="margin-top: 8px">
-            <span class="toggle-label">auto_grounding</span>
-            <label class="toggle"
-              ><input type="checkbox" id="auto_grounding" /><span
-                class="slider"
-              ></span
-            ></label>
-          </div>
-          <div class="toggle-row" style="margin-top: 8px">
-            <span class="toggle-label">debug_grounding</span>
-            <label class="toggle"
-              ><input type="checkbox" id="debug_grounding" /><span
-                class="slider"
-              ></span
-            ></label>
-          </div>
-          <div class="field" style="margin-top: 10px">
-            <label>grounding_sentences</label>
-            <input
-              type="number"
-              id="grounding_sentences"
-              value="2"
-              min="1"
-              max="20"
-            />
-          </div>
-        </div>
-      </aside>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Generate</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&family=Syne:wght@700;800&display=swap"
+    rel="stylesheet" />
+  <script src="config.js"></script>
+  <link rel="stylesheet" href="chatbot.css">
+</head>
 
-      <main>
-        <div id="messages">
-          <div class="empty" id="empty">
-            <div class="glyph">⌘</div>
-            <p>Adjust params · write a prompt · send</p>
-          </div>
-        </div>
-        <div class="input-area">
-          <div class="input-row">
-            <textarea
-              id="prompt"
-              placeholder="Enter prompt…"
-              rows="1"
-            ></textarea>
-            <button id="send-btn" title="Send">
-              <svg viewBox="0 0 24 24">
-                <line x1="22" y1="2" x2="11" y2="13" />
-                <polygon points="22 2 15 22 11 13 2 9 22 2" />
-              </svg>
-            </button>
-          </div>
-          <div class="hint">
-            <kbd>Shift+Enter</kbd> newline &nbsp;·&nbsp; Enter to send
-          </div>
-        </div>
-      </main>
+<body>
+    <div id="username-modal" style="
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center;
+  ">
+    <div style="
+      background: var(--bg, #fff); 
+      border: 0.5px solid #ccc;
+      border-radius: 12px;
+      padding: 2rem;
+      width: 320px;
+      font-family: 'IBM Plex Mono', monospace;
+    ">
+      <div style="font-size: 18px; font-weight: 700; margin-bottom: 4px;">CS-5822</div>
+      <div style="font-size: 12px; color: #888; margin-bottom: 1.5rem;">Enter a username to continue</div>
+      <input 
+        id="username-input" 
+        type="text" 
+        placeholder="username…"
+        style="width: 100%; box-sizing: border-box; margin-bottom: 12px;"
+      />
+      <button id="username-submit" style="width: 100%;">Continue →</button>
+      <div id="username-error" style="font-size: 11px; color: red; margin-top: 8px; display: none;">
+        Please enter a username.
+      </div>
     </div>
+  </div>
+  <div class="app">
+    <header>
+      <div class="dot"></div>
+      <div class="title">CS-5822</div>
+      <div class="badge">FastAPI · /generate</div>
+    </header>
 
-    <script>
-      const API = CONFIG.API;
+    <aside>
+      <div>
+        <div class="section-title">Model</div>
+        <div class="field">
+          <label>model_file_name</label>
+          <input type="text" id="model_file_name" value="Model_finetuned_best.pth" />
+        </div>
+      </div>
+      <div>
+        <div class="section-title">Prompt extras</div>
+        <div class="field">
+          <label>context</label>
+          <input type="text" id="context" placeholder="optional context…" />
+        </div>
+        <div class="field" style="margin-top: 8px">
+          <label>instruction</label>
+          <input type="text" id="instruction" placeholder="optional instruction…" />
+        </div>
+      </div>
+      <div>
+        <div class="section-title">Sampling</div>
+        <div class="field">
+          <label>temperature</label>
+          <div class="range-row">
+            <input type="range" id="temperature" min="0" max="2" step="0.05" value="0.1" />
+            <span class="range-val" id="temperature_val">0.10</span>
+          </div>
+        </div>
+        <div class="field" style="margin-top: 8px">
+          <label>top_k</label>
+          <div class="range-row">
+            <input type="range" id="top_k" min="1" max="100" step="1" value="10" />
+            <span class="range-val" id="top_k_val">10</span>
+          </div>
+        </div>
+        <div class="field" style="margin-top: 8px">
+          <label>max_new_tokens</label>
+          <div class="range-row">
+            <input type="range" id="max_new_tokens" min="10" max="512" step="10" value="80" />
+            <span class="range-val" id="max_new_tokens_val">80</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="section-title">Flags</div>
+        <div class="toggle-row">
+          <span class="toggle-label">prepend_bos</span>
+          <label class="toggle"><input type="checkbox" id="prepend_bos" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row" style="margin-top: 8px">
+          <span class="toggle-label">auto_grounding</span>
+          <label class="toggle"><input type="checkbox" id="auto_grounding" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row" style="margin-top: 8px">
+          <span class="toggle-label">strict_context_grounding</span>
+          <label class="toggle"><input type="checkbox" id="strict_context_grounding" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row" style="margin-top: 8px">
+          <span class="toggle-label">debug_grounding</span>
+          <label class="toggle"><input type="checkbox" id="debug_grounding" /><span class="slider"></span></label>
+        </div>
+        <div class="field" style="margin-top: 10px">
+          <label>grounding_sentences</label>
+          <input type="number" id="grounding_sentences" value="2" min="1" max="20" />
+        </div>
+      </div>
+      <div>
+        <div class="section-title">Class Notes</div>
+        <div class="field">
+          <label>upload note</label>
+          <input type="file" id="note-file" accept=".txt,.pdf,.md" />
+        </div>
+        <button id="upload-btn" style="margin-top: 8px; width: 100%;">Upload</button>
+        <div id="upload-status" style="font-size: 12px; margin-top: 6px; color: var(--color-text-secondary);"></div>
+      </div>
+    </aside>
 
-      document.addEventListener("DOMContentLoaded", function () {
-        ["temperature", "top_k", "max_new_tokens"].forEach((id) => {
-          const el = document.getElementById(id);
-          const vl = document.getElementById(id + "_val");
-          const fmt =
-            id === "temperature" ? (v) => parseFloat(v).toFixed(2) : (v) => v;
-          el.addEventListener("input", () => (vl.textContent = fmt(el.value)));
-        });
+    <main>
+      <div id="messages">
+        <div class="empty" id="empty">
+          <div class="glyph">⌘</div>
+          <p>Adjust params · write a prompt · send</p>
+        </div>
+      </div>
+      <div class="input-area">
+        <div class="input-row">
+          <textarea id="prompt" placeholder="Enter prompt…" rows="1"></textarea>
+          <button id="send-btn" title="Send">
+            <svg viewBox="0 0 24 24">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
+        </div>
+        <div class="hint">
+          <kbd>Shift+Enter</kbd> newline &nbsp;·&nbsp; Enter to send
+        </div>
+      </div>
+    </main>
+  </div>
 
-        promptEl.addEventListener("input", () => {
-          promptEl.style.height = "auto";
-          promptEl.style.height = Math.min(promptEl.scrollHeight, 140) + "px";
-        });
-        promptEl.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            send();
-          }
-        });
-        document.getElementById("send-btn").addEventListener("click", send);
+  <script>
+    const API = CONFIG.API;
+    const promptEl = document.getElementById("prompt");
+
+    document.addEventListener("DOMContentLoaded", function () {
+      ["temperature", "top_k", "max_new_tokens"].forEach((id) => {
+        const el = document.getElementById(id);
+        const vl = document.getElementById(id + "_val");
+        const fmt =
+          id === "temperature" ? (v) => parseFloat(v).toFixed(2) : (v) => v;
+        el.addEventListener("input", () => (vl.textContent = fmt(el.value)));
       });
 
-      function esc(s) {
-        return s
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;");
-      }
-      const msgsEl = document.getElementById("messages");
-
-      function addMsg(role, text) {
-        document.getElementById("empty").style.display = "none";
-        const labels = { user: "▸ you", bot: "◈ model", err: "✕ error" };
-        const div = document.createElement("div");
-        div.className = "msg " + role;
-        div.innerHTML = `<div class="msg-lbl">${labels[role] || role}</div><div class="msg-body">${esc(text)}</div>`;
-        msgsEl.appendChild(div);
-        msgsEl.scrollTop = msgsEl.scrollHeight;
-      }
-
-      function addDebug(stderr) {
-        if (!stderr) return;
-        const det = document.createElement("details");
-        det.className = "msg-debug";
-        det.innerHTML = `<summary>stderr / debug</summary>\n${esc(stderr)}`;
-        msgsEl.appendChild(det);
-        msgsEl.scrollTop = msgsEl.scrollHeight;
-      }
-
-      function addTyping() {
-        document.getElementById("empty").style.display = "none";
-        const div = document.createElement("div");
-        div.className = "msg bot typing";
-        div.innerHTML = `<div class="msg-lbl">◈ model</div><div class="msg-body"><div class="d"></div><div class="d"></div><div class="d"></div></div>`;
-        msgsEl.appendChild(div);
-        msgsEl.scrollTop = msgsEl.scrollHeight;
-        return div;
-      }
-
-      function getParams() {
-        return {
-          prompt: promptEl.value.trim(),
-          model_file_name: document
-            .getElementById("model_file_name")
-            .value.trim(),
-          context: document.getElementById("context").value.trim(),
-          instruction: document.getElementById("instruction").value.trim(),
-          temperature: parseFloat(document.getElementById("temperature").value),
-          top_k: parseInt(document.getElementById("top_k").value),
-          max_new_tokens: parseInt(
-            document.getElementById("max_new_tokens").value,
-          ),
-          prepend_bos: document.getElementById("prepend_bos").checked,
-          auto_grounding: document.getElementById("auto_grounding").checked,
-          grounding_sentences: parseInt(
-            document.getElementById("grounding_sentences").value,
-          ),
-          debug_grounding: document.getElementById("debug_grounding").checked,
-        };
-      }
-
-      async function send() {
-        const promptEl = document.getElementById("prompt");
-        const params = getParams();
-        if (!params.prompt) return;
-
-        addMsg("user", params.prompt);
-        promptEl.value = "";
+      promptEl.addEventListener("input", () => {
         promptEl.style.height = "auto";
-        document.getElementById("send-btn").disabled = true;
-        const typing = addTyping();
-
-        try {
-          const res = await fetch(API, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(params),
-          });
-          const data = await res.json();
-          typing.remove();
-
-          if (!res.ok) {
-            addMsg("err", data.detail || `HTTP ${res.status}`);
-          } else if (data.returncode !== 0) {
-            addMsg("err", data.output || "Script exited with non-zero code.");
-            addDebug(data.stderr);
-          } else {
-            addMsg("bot", data.output);
-            addDebug(data.stderr); // only visible if debug_grounding is on
-          }
-        } catch (e) {
-          typing.remove();
-          addMsg("err", "Could not reach FastAPI server.\n" + e.message);
-        } finally {
-          document.getElementById("send-btn").disabled = false;
-          promptEl.focus();
+        promptEl.style.height = Math.min(promptEl.scrollHeight, 140) + "px";
+      });
+      promptEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          send();
         }
+      });
+      document.getElementById("send-btn").addEventListener("click", send);
+    });
+
+    function esc(s) {
+      return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+    const msgsEl = document.getElementById("messages");
+
+    function addMsg(role, text) {
+      document.getElementById("empty").style.display = "none";
+      const labels = { user: "▸ you", bot: "◈ model", err: "✕ error" };
+      const div = document.createElement("div");
+      div.className = "msg " + role;
+      div.innerHTML = `<div class="msg-lbl">${labels[role] || role}</div><div class="msg-body">${esc(text)}</div>`;
+      msgsEl.appendChild(div);
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+    }
+
+    function addDebug(stderr) {
+      if (!stderr) return;
+      const det = document.createElement("details");
+      det.className = "msg-debug";
+      det.innerHTML = `<summary>stderr / debug</summary>\n${esc(stderr)}`;
+      msgsEl.appendChild(det);
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+    }
+
+    function addTyping() {
+      document.getElementById("empty").style.display = "none";
+      const div = document.createElement("div");
+      div.className = "msg bot typing";
+      div.innerHTML = `<div class="msg-lbl">◈ model</div><div class="msg-body"><div class="d"></div><div class="d"></div><div class="d"></div></div>`;
+      msgsEl.appendChild(div);
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+      return div;
+    }
+
+    function getParams() {
+      return {
+        prompt: promptEl.value.trim(),
+        model_file_name: document
+          .getElementById("model_file_name")
+          .value.trim(),
+        context: document.getElementById("context").value.trim(),
+        instruction: document.getElementById("instruction").value.trim(),
+        temperature: parseFloat(document.getElementById("temperature").value),
+        top_k: parseInt(document.getElementById("top_k").value),
+        max_new_tokens: parseInt(
+          document.getElementById("max_new_tokens").value,
+        ),
+        prepend_bos: document.getElementById("prepend_bos").checked,
+        auto_grounding: document.getElementById("auto_grounding").checked,
+        grounding_sentences: parseInt(
+          document.getElementById("grounding_sentences").value,
+        ),
+        debug_grounding: document.getElementById("debug_grounding").checked,
+        user_id: currentUser,
+        trict_context_grounding: document.getElementById("strict_context_grounding").checked,
+      };
+    }
+
+
+    let currentUser = null;
+
+    function setUploadButtonState() {
+      const uploadBtn = document.getElementById("upload-btn");
+      uploadBtn.disabled = !currentUser;
+    }
+
+    function initUsernameGate() {
+      const modal = document.getElementById("username-modal");
+      const input = document.getElementById("username-input");
+      const btn = document.getElementById("username-submit");
+      const err = document.getElementById("username-error");
+
+      function submit() {
+        const val = input.value.trim();
+        if (!val) { err.style.display = "block"; return; }
+        currentUser = val;
+        modal.style.display = "none";
+        addMsg("bot", `Welcome, ${currentUser}. Ask me anything about your notes.`);
+        setUploadButtonState();
       }
-    </script>
-  </body>
+
+      btn.addEventListener("click", submit);
+      input.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      initUsernameGate();
+      setUploadButtonState();
+    });
+
+    async function send() {
+      const params = getParams();
+      if (!params.prompt) return;
+
+      addMsg("user", params.prompt);
+      promptEl.value = "";
+      promptEl.style.height = "auto";
+      document.getElementById("send-btn").disabled = true;
+      const typing = addTyping();
+
+      try {
+        const res = await fetch(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+        });
+        const data = await res.json();
+        typing.remove();
+
+        if (!res.ok) {
+          addMsg("err", data.detail || `HTTP ${res.status}`);
+        } else if (data.returncode !== 0) {
+          addMsg("err", data.output || "Script exited with non-zero code.");
+          addDebug(data.stderr);
+        } else {
+          addMsg("bot", data.output);
+          addDebug(data.stderr); // only visible if debug_grounding is on
+        }
+      } catch (e) {
+        typing.remove();
+        addMsg("err", "Could not reach FastAPI server.\n" + e.message);
+      } finally {
+        document.getElementById("send-btn").disabled = false;
+        promptEl.focus();
+      }
+    }
+
+    document.getElementById("upload-btn").addEventListener("click", async () => {
+      const fileInput = document.getElementById("note-file");
+      const statusEl = document.getElementById("upload-status");
+      const file = fileInput.files[0];
+      if (!currentUser) {
+        statusEl.textContent = "Please enter a username before uploading.";
+        return;
+      }
+      if (!file) { statusEl.textContent = "No file selected."; return; }
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("user_id", currentUser);
+      statusEl.textContent = "Uploading…";
+
+      try {
+        const res = await fetch(CONFIG.API.replace("/generate", "/uploadfile/"), {
+          method: "POST",
+          body: formData,
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          statusEl.textContent = "Error: " + (data.detail || `HTTP ${res.status}`);
+        } else {
+          statusEl.textContent = data.message;
+          fileInput.value = "";
+        }
+      } catch (e) {
+        statusEl.textContent = "Could not reach server: " + e.message;
+      }
+    });
+  </script>
+</body>
+
 </html>

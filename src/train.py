@@ -128,8 +128,8 @@ def train_model():
         MODEL_DIR / f"{model.__class__.__name__}_final.pth"
     )
     print(f"\nTraining complete.")
-    print(f"  Best model:   {model.__class__.__name__}_best.pth (step {best_step}, val_loss {best_val_loss:.4f})")
-    print(f"  Final model:  {model.__class__.__name__}_final.pth (step {STEPS})")
+    print(f"Best model:   {model.__class__.__name__}_best.pth (step {best_step}, val_loss {best_val_loss:.4f})")
+    print(f"Final model:  {model.__class__.__name__}_final.pth (step {STEPS})")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

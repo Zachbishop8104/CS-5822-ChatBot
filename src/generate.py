@@ -5,7 +5,51 @@ from tokenizer import load
 from pathlib import Path
 import argparse
 import re
+import os
 
+MAX_CONTEXT_TOKENS = 512
+MAX_PROMPT_TOKENS = 400  
+MAX_NEW_TOKENS = 112  # leaves room within 1024
+
+# For retrieval augmented generation (RAG)
+def _load_user_notes(user_id: str) -> str:
+    """Concatenate all of a user's saved note files into one string."""
+    user_dir = f"../users/{user_id}"
+    if not os.path.exists(user_dir):
+        return ""
+    texts = []
+    for fname in os.listdir(user_dir):
+        if fname.endswith(".txt"):
+            with open(os.path.join(user_dir, fname), "r", encoding="utf-8") as f:
+                texts.append(f.read())
+    return "\n\n".join(texts)
+
+
+def _retrieve_context(query: str, notes: str, chunk_size: int = 500, top_k: int = 3) -> str:
+    """Split notes into chunks and return the most relevant ones for the query."""
+    if not notes.strip():
+        return ""
+
+    # split into overlapping chunks
+    words = notes.split()
+    chunks = []
+    step = chunk_size // 2  # 50% overlap so context isn't cut off at boundaries
+    for i in range(0, len(words), step):
+        chunk = " ".join(words[i:i + chunk_size])
+        if chunk.strip():
+            chunks.append(chunk)
+
+    # score each chunk by keyword overlap with query
+    query_terms = set(_tokenize_terms(query))
+    scored = []
+    for chunk in chunks:
+        chunk_terms = set(_tokenize_terms(chunk))
+        score = len(query_terms & chunk_terms)
+        scored.append((score, chunk))
+
+    scored.sort(key=lambda x: -x[0])
+    top_chunks = [c for _, c in scored[:top_k]]
+    return "\n\n".join(top_chunks)
 
 _STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how",
@@ -13,10 +57,16 @@ _STOPWORDS = {
     "when", "where", "which", "who", "why", "with",
 }
 
+def _stem(word: str) -> str:
+    # very basic suffix stripping
+    for suffix in ["ing", "tion", "ment", "ed", "ly", "er", "al"]:
+        if word.endswith(suffix) and len(word) - len(suffix) > 3:
+            return word[:-len(suffix)]
+    return word
 
 def _tokenize_terms(text: str):
     words = re.findall(r"[a-z0-9]+", text.lower())
-    return [w for w in words if w not in _STOPWORDS and len(w) > 1]
+    return [_stem(w) for w in words if w not in _STOPWORDS and len(w) > 1]
 
 
 def _split_sentences(text: str):
@@ -158,7 +208,15 @@ def generate(
     grounding_sentences=2,
     auto_grounding=False,
     return_source=False,
+    user_id=None,
 ):
+    # Auto-load context from user notes if no context was manually provided
+    if not context and user_id:
+        notes = _load_user_notes(user_id)
+        if notes:
+            context = _retrieve_context(prompt, notes, chunk_size=200, top_k=2)
+            print(f"[DEBUG] Retrieved context: {context[:300]}", flush=True)
+            
     source = "model"
     if strict_context_grounding:
         fallback = _extractive_context_answer(
@@ -185,16 +243,27 @@ def generate(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.eval()
-    if device.type == "cuda":
-        model.half()
+    
+    # if device.type == "cuda":
+    #     model.half()
+    #     input_ids = input_ids  # int tensors are fine
+        # but you need to ensure internal float ops stay consistent
 
     # Prepare input IDs
+    if context:
+        context_ids = tok.encode(context).ids
+        if len(context_ids) > MAX_CONTEXT_TOKENS:
+            # decode back to text after trimming
+            context = tok.decode(context_ids[:MAX_CONTEXT_TOKENS])
+
     formatted_prompt = _format_qa_prompt(prompt, context=context, instruction=instruction)
     ids = tok.encode(formatted_prompt).ids
     if prepend_bos:
         bos_id = tok.token_to_id("[BOS]")
         if bos_id is not None:
             ids = [bos_id] + ids
+    
+    ids = ids[-1024:]  # Truncate to model's max context length
     input_ids = torch.tensor([ids], device=device, dtype=torch.long)
     eos_id = tok.token_to_id("[EOS]")
 
@@ -338,6 +407,7 @@ if __name__ == "__main__":
         default=None,
         help="Prompt text for non-interactive mode (skips Enter a prompt input).",
     )
+    parser.add_argument("--user_id", type=str, default=None)
     args = parser.parse_args()
 
     prompt = args.prompt if args.prompt is not None else input("Enter a prompt: ")
@@ -355,9 +425,17 @@ if __name__ == "__main__":
         grounding_sentences=args.grounding_sentences,
         auto_grounding=args.auto_grounding,
         return_source=args.debug_grounding,
+        user_id=args.user_id,
     )
+    
     if args.debug_grounding:
         answer, source = output
         print(f"\n[source={source}]\n{answer}")
     else:
         print(f"\n{output}")
+        
+    with open("../generation_history.log", "a") as f:
+        f.write(f"Prompt: {prompt}\n")
+        f.write(f"All args: {args}\n")
+        f.write(f"Output: {output}\n")
+        f.write("\n\n")
