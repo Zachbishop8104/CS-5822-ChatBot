@@ -82,7 +82,7 @@ Expected outputs in `model_state`:
 1. `Model_best.pth`
 2. `Model_final.pth`
 
-### 5) Fine-Tune on QA Data
+### 5 Fine-Tune on QA Data
 
 Build QA dataset (SQuAD format with context):
 
