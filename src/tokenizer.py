@@ -11,6 +11,7 @@ import argparse
 import logging
 import os
 from pathlib import Path
+from urllib.request import urlretrieve
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
@@ -91,7 +92,7 @@ def dump_texts():
 # Train Byte Pair Encoding tokenizer
 # using huggingface tokenizers library
 # This takes an hour or two
-def train(vocab_size: int = 8000, log_every: int = 1_000_000):
+def train(vocab_size: int = 8000, log_every: int = 1_000_000, include_qa: bool = False):
     """
     Train a BPE tokenizer on the dumped raw text files.
 
@@ -99,12 +100,16 @@ def train(vocab_size: int = 8000, log_every: int = 1_000_000):
         vocab_size (int): target vocabulary size
         log_every (int): log a message every `log_every` lines processed
     """
-    txt_files = list(RAW_TEXT_DIR.rglob("*.txt"))
+    txt_files = [
+        p for p in RAW_TEXT_DIR.rglob("*.txt")
+        if include_qa or "qa" not in p.relative_to(RAW_TEXT_DIR).parts
+    ]
     if not txt_files:
         raise FileNotFoundError(f"No .txt files found in {RAW_TEXT_DIR}. Run --dump first.")
 
     TOKENIZER_DIR.mkdir(parents=True, exist_ok=True)
-    log.info(f"Training on {len(txt_files)} file(s) with vocab_size={vocab_size}")
+    qa_mode = "including QA files" if include_qa else "excluding raw_text/qa"
+    log.info(f"Training on {len(txt_files)} file(s) with vocab_size={vocab_size} ({qa_mode})")
 
     tokenizer = Tokenizer(BPE(unk_token="[UNK]", end_of_word_suffix="</w>"))
     tokenizer.pre_tokenizer = Sequence([Whitespace(), Punctuation()])
@@ -141,13 +146,44 @@ def load() -> Tokenizer:
     return tokenizer
 
 
-# CLI
+# got sick and tired of retaining this thing so added a download option to pull the pretrained tokenizer.json from Hugging Face
+def download_pretrained(model_id: str = "openai-community/gpt2"):
+    """Download tokenizer.json from Hugging Face and ensure project special tokens exist."""
+    TOKENIZER_DIR.mkdir(parents=True, exist_ok=True)
+    url = f"https://huggingface.co/{model_id}/resolve/main/tokenizer.json"
+    log.info(f"Downloading tokenizer from: {url}")
+    urlretrieve(url, str(TOKENIZER_PATH))
+
+    tokenizer = Tokenizer.from_file(str(TOKENIZER_PATH))
+    missing = [tok for tok in SPECIAL_TOKENS if tokenizer.token_to_id(tok) is None]
+    if missing:
+        tokenizer.add_special_tokens(missing)
+        tokenizer.save(str(TOKENIZER_PATH))
+        log.info(f"Added missing special tokens: {missing}")
+
+    log.info(
+        f"Tokenizer ready at: {TOKENIZER_PATH} "
+        f"(vocab_size={tokenizer.get_vocab_size()}, model_id={model_id})"
+    )
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dump", action="store_true", help="Dump raw text from HuggingFace")
     parser.add_argument("--train", action="store_true", help="Train the tokenizer")
+    parser.add_argument("--download", action="store_true", help="Download a pretrained tokenizer.json")
+    parser.add_argument(
+        "--model_id",
+        default="openai-community/gpt2",
+        help="Hugging Face model id used with --download (must provide tokenizer.json).",
+    )
     parser.add_argument("--test", action="store_true", help="Test the tokenizer")
     parser.add_argument("--vocab_size", type=int, default=40_000, help="Vocabulary size for training the tokenizer")
+    parser.add_argument(
+        "--include_qa",
+        action="store_true",
+        help="Include raw_text/qa/*.txt files during tokenizer training (default: excluded).",
+    )
     parser.add_argument("--text", default="What is photosynthesis and how does it work?")
     args = parser.parse_args()
 
@@ -155,7 +191,10 @@ if __name__ == "__main__":
         dump_texts()
 
     if args.train:
-        train(args.vocab_size)
+        train(args.vocab_size, include_qa=args.include_qa)
+
+    if args.download:
+        download_pretrained(args.model_id)
 
     if args.test:
         tokenizer = load()

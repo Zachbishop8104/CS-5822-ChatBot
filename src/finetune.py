@@ -39,6 +39,9 @@ def load_qa_tokens(val_ratio=0.05):
             ids = ids + [eos_id]
         encoded.append(ids)
 
+    rng = np.random.default_rng(42)
+    encoded = [encoded[i] for i in rng.permutation(len(encoded))]
+
     split_idx = int(len(encoded) * (1 - val_ratio))
     split_idx = max(1, min(split_idx, len(encoded) - 1))
 
@@ -80,7 +83,16 @@ def evaluate(model, tokens, loss_fn, vocab_size, device, batch_size, seq_len, st
     return total / steps
 
 
-def finetune(model_file_name, steps=3000, batch_size=32, seq_len=256, lr=5e-6, eval_interval=200, val_ratio=0.05):
+def finetune(
+    model_file_name,
+    steps=9000,
+    batch_size=32,
+    seq_len=256,
+    lr=1e-5,
+    eval_interval=200,
+    val_ratio=0.05,
+    early_stop_patience=12,
+):
     tok = load()
     vocab_size = tok.get_vocab_size()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -127,6 +139,7 @@ def finetune(model_file_name, steps=3000, batch_size=32, seq_len=256, lr=5e-6, e
     import os
     best_val_loss = float("inf")
     best_step = -1
+    bad_eval_count = 0
     base_output_name = "Model_finetuned_best.pth"
     def get_unique_output_path(base_name):
         output_path = MODEL_DIR / base_name
@@ -176,6 +189,7 @@ def finetune(model_file_name, steps=3000, batch_size=32, seq_len=256, lr=5e-6, e
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_step = step
+                bad_eval_count = 0
                 # Save to a unique file if not already saved
                 torch.save(
                     {
@@ -191,6 +205,14 @@ def finetune(model_file_name, steps=3000, batch_size=32, seq_len=256, lr=5e-6, e
                     best_output_path,
                 )
                 print(f"*New best val loss: {val_loss:.4f} @ step {step} (saved to {best_output_path.name})")
+            else:
+                bad_eval_count += 1
+                if early_stop_patience > 0 and bad_eval_count >= early_stop_patience:
+                    print(
+                        f"Early stopping at step {step}: no val improvement for "
+                        f"{bad_eval_count} evals."
+                    )
+                    break
     if best_step >= 0:
         print(
             f"Best finetuned model: {best_output_path.name} "
@@ -202,12 +224,13 @@ def finetune(model_file_name, steps=3000, batch_size=32, seq_len=256, lr=5e-6, e
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_file_name", default="Model_best.pth")
-    parser.add_argument("--steps", type=int, default=20000)
+    parser.add_argument("--steps", type=int, default=9000)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--seq_len", type=int, default=256)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--eval_interval", type=int, default=200)
     parser.add_argument("--val_ratio", type=float, default=0.05)
+    parser.add_argument("--early_stop_patience", type=int, default=12)
     args = parser.parse_args()
 
     finetune(
@@ -218,4 +241,5 @@ if __name__ == "__main__":
         lr=args.lr,
         eval_interval=args.eval_interval,
         val_ratio=args.val_ratio,
+        early_stop_patience=args.early_stop_patience,
     )

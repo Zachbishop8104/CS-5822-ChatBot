@@ -25,6 +25,20 @@ def _load_user_notes(user_id: str) -> str:
     return "\n\n".join(texts)
 
 
+def _clean_context(text: str) -> str:
+    """Remove metadata, URLs, and special characters that confuse the model."""
+    # Remove URLs
+    text = re.sub(r"https?://\S+", "", text)
+    # Remove JSTOR/journal metadata patterns
+    text = re.sub(r"(?:JSTOR|Source:|Published by:|Stable URL:|doi:).*?(?:\n|$)", "", text, flags=re.IGNORECASE)
+    # Remove citations like [1], [2]
+    text = re.sub(r"\[\d+\]", "", text)
+    # Remove multiple consecutive spaces/newlines
+    text = re.sub(r" {2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _retrieve_context(query: str, notes: str, chunk_size: int = 500, top_k: int = 3) -> str:
     """Split notes into chunks and return the most relevant ones for the query."""
     if not notes.strip():
@@ -215,6 +229,7 @@ def generate(
         notes = _load_user_notes(user_id)
         if notes:
             context = _retrieve_context(prompt, notes, chunk_size=200, top_k=2)
+            context = _clean_context(context)  # Clean before using
             print(f"[DEBUG] Retrieved context: {context[:300]}", flush=True)
             
     source = "model"
@@ -251,6 +266,7 @@ def generate(
 
     # Prepare input IDs
     if context:
+        context = _clean_context(context)  # Clean context before encoding
         context_ids = tok.encode(context).ids
         if len(context_ids) > MAX_CONTEXT_TOKENS:
             # decode back to text after trimming

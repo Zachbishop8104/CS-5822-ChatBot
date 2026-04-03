@@ -67,6 +67,7 @@ def batch_generator(batch_size=32, seq_len=512, split="train"):
     train_mm, train_sz, val_mm, val_sz = _get_cache()
     memmaps = train_mm if split == "train" else val_mm
     sizes = train_sz if split == "train" else val_sz
+    use_pin_memory = torch.cuda.is_available()
 
     while True:
         xs, ys = [], []
@@ -74,4 +75,9 @@ def batch_generator(batch_size=32, seq_len=512, split="train"):
             x, y = _sample(memmaps, sizes, seq_len)
             xs.append(x)
             ys.append(y)
-        yield torch.stack(xs).pin_memory(), torch.stack(ys).pin_memory()
+        batch_x = torch.stack(xs)
+        batch_y = torch.stack(ys)
+        if use_pin_memory:
+            batch_x = batch_x.pin_memory()
+            batch_y = batch_y.pin_memory()
+        yield batch_x, batch_y
