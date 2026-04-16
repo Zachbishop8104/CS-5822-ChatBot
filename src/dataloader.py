@@ -45,11 +45,11 @@ def _get_cache():
 
 def _sample(memmaps, sizes, seq_len):
     """Pick a random sequence from a weighted random file."""
-    probs      = sizes / sizes.sum()
-    idx        = np.random.choice(len(memmaps), p=probs)
-    mm         = memmaps[idx]
-    start      = np.random.randint(0, len(mm) - seq_len - 1)
-    chunk      = mm[start:start + seq_len + 1].copy()
+    probs = sizes / sizes.sum()
+    idx = np.random.choice(len(memmaps), p=probs)
+    mm = memmaps[idx]
+    start = np.random.randint(0, len(mm) - seq_len - 1)
+    chunk = mm[start:start + seq_len + 1].copy()
     x = torch.from_numpy(chunk[:-1].astype(np.int64))
     y = torch.from_numpy(chunk[1:].astype(np.int64))
     return x, y
