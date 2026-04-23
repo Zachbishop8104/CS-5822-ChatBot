@@ -49,7 +49,3 @@ fetch('http://<server-ip>:8000/generate', {
   .then(r => r.json())
   .then(console.log)
 ```
-
-## Notes
-- The server simply shells out to generate.py and returns its output.
-- The server must be started from the project root or paths may need adjustment.

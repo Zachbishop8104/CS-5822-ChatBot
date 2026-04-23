@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Generate</title>
+  <title>CS-5822 Chatbot</title>
   <link
     href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&family=Syne:wght@700;800&display=swap"
     rel="stylesheet" />
@@ -44,7 +44,6 @@
     <header>
       <div class="dot"></div>
       <div class="title">CS-5822</div>
-      <div class="badge">FastAPI · /generate</div>
     </header>
 
     <aside>
@@ -89,6 +88,29 @@
             <span class="range-val" id="max_new_tokens_val">80</span>
           </div>
         </div>
+        <!--
+        <div class="field" style="margin-top: 8px">
+          <label>rewrite_temperature</label>
+          <div class="range-row">
+            <input type="range" id="rewrite_temperature" min="0" max="1" step="0.05" value="0.2" />
+            <span class="range-val" id="rewrite_temperature_val">0.20</span>
+          </div>
+        </div>
+        <div class="field" style="margin-top: 8px">
+          <label>rewrite_top_k</label>
+          <div class="range-row">
+            <input type="range" id="rewrite_top_k" min="1" max="100" step="1" value="20" />
+            <span class="range-val" id="rewrite_top_k_val">20</span>
+          </div>
+        </div>
+        <div class="field" style="margin-top: 8px">
+          <label>rewrite_max_new_tokens</label>
+          <div class="range-row">
+            <input type="range" id="rewrite_max_new_tokens" min="20" max="256" step="10" value="70" />
+            <span class="range-val" id="rewrite_max_new_tokens_val">70</span>
+          </div>
+        </div>
+        -->
       </div>
       <div>
         <div class="section-title">Flags</div>
@@ -98,7 +120,7 @@
         </div>
         <div class="toggle-row" style="margin-top: 8px">
           <span class="toggle-label">auto_grounding</span>
-          <label class="toggle"><input type="checkbox" id="auto_grounding" /><span class="slider"></span></label>
+          <label class="toggle"><input type="checkbox" id="auto_grounding" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row" style="margin-top: 8px">
           <span class="toggle-label">strict_context_grounding</span>
@@ -110,7 +132,7 @@
         </div>
         <div class="field" style="margin-top: 10px">
           <label>grounding_sentences</label>
-          <input type="number" id="grounding_sentences" value="2" min="1" max="20" />
+          <input type="number" id="grounding_sentences" value="3" min="1" max="20" />
         </div>
       </div>
       <div>
@@ -121,6 +143,15 @@
         </div>
         <button id="upload-btn" style="margin-top: 8px; width: 100%;">Upload</button>
         <div id="upload-status" style="font-size: 12px; margin-top: 6px; color: var(--color-text-secondary);"></div>
+        <div class="field" style="margin-top: 12px;">
+          <label>available notes</label>
+          <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <button id="notes-select-all" type="button" style="flex:1;">Select all</button>
+            <button id="notes-clear-all" type="button" style="flex:1;">Clear</button>
+          </div>
+          <div id="note-picker" style="max-height: 160px; overflow:auto; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 8px;"></div>
+          <div id="notes-status" style="font-size: 11px; margin-top: 6px; color: var(--color-text-secondary);"></div>
+        </div>
       </div>
     </aside>
 
@@ -149,15 +180,21 @@
   </div>
 
   <script>
-    const API = CONFIG.API;
+    const API_BASE = CONFIG.API_BASE ?? window.location.origin;
+    const generateEndpoint = `${API_BASE}/generate`;
+    const notesEndpoint = `${API_BASE}/notes`;
+    const uploadEndpoint = `${API_BASE}/uploadfile/`;
+
     const promptEl = document.getElementById("prompt");
+    const notePickerEl = document.getElementById("note-picker");
+    const notesStatusEl = document.getElementById("notes-status");
+    let availableNotes = [];
 
     document.addEventListener("DOMContentLoaded", function () {
       ["temperature", "top_k", "max_new_tokens"].forEach((id) => {
         const el = document.getElementById(id);
         const vl = document.getElementById(id + "_val");
-        const fmt =
-          id === "temperature" ? (v) => parseFloat(v).toFixed(2) : (v) => v;
+        const fmt = id === "temperature" ? (v) => parseFloat(v).toFixed(2) : (v) => v;
         el.addEventListener("input", () => (vl.textContent = fmt(el.value)));
       });
 
@@ -214,25 +251,64 @@
     function getParams() {
       return {
         prompt: promptEl.value.trim(),
-        model_file_name: document
-          .getElementById("model_file_name")
-          .value.trim(),
-        context: document.getElementById("context").value.trim(),
-        instruction: document.getElementById("instruction").value.trim(),
+        model_file_name: document.getElementById("model_file_name").value.trim(),
         temperature: parseFloat(document.getElementById("temperature").value),
         top_k: parseInt(document.getElementById("top_k").value),
-        max_new_tokens: parseInt(
-          document.getElementById("max_new_tokens").value,
-        ),
-        prepend_bos: document.getElementById("prepend_bos").checked,
-        auto_grounding: document.getElementById("auto_grounding").checked,
-        grounding_sentences: parseInt(
-          document.getElementById("grounding_sentences").value,
-        ),
-        debug_grounding: document.getElementById("debug_grounding").checked,
+        max_new_tokens: parseInt(document.getElementById("max_new_tokens").value),
+        // The following are commented out as they are not used in the new generate.py
+        // context: document.getElementById("context").value.trim(),
+        // instruction: document.getElementById("instruction").value.trim(),
+        // rewrite_temperature: parseFloat(document.getElementById("rewrite_temperature").value),
+        // rewrite_top_k: parseInt(document.getElementById("rewrite_top_k").value),
+        // rewrite_max_new_tokens: parseInt(document.getElementById("rewrite_max_new_tokens").value),
+        // prepend_bos: document.getElementById("prepend_bos").checked,
+        // auto_grounding: document.getElementById("auto_grounding").checked,
+        // grounding_sentences: parseInt(document.getElementById("grounding_sentences").value),
+        // debug_grounding: document.getElementById("debug_grounding").checked,
         user_id: currentUser,
-        trict_context_grounding: document.getElementById("strict_context_grounding").checked,
+        // strict_context_grounding: document.getElementById("strict_context_grounding").checked,
+        // selected_note_files: getSelectedNotes(),
       };
+    }
+
+    function getSelectedNotes() {
+      return Array.from(notePickerEl.querySelectorAll('input[type="checkbox"]'))
+        .filter((el) => el.checked)
+        .map((el) => el.value);
+    }
+
+    function renderNotes(notes) {
+      availableNotes = notes || [];
+      notePickerEl.innerHTML = "";
+      if (!availableNotes.length) {
+        notesStatusEl.textContent = "No uploaded notes yet.";
+        return;
+      }
+      notesStatusEl.textContent = `${availableNotes.length} note(s) available.`;
+      availableNotes.forEach((name) => {
+        const row = document.createElement("label");
+        row.style.display = "flex";
+        row.style.alignItems = "center";
+        row.style.gap = "8px";
+        row.style.marginBottom = "6px";
+        row.style.fontSize = "12px";
+        row.innerHTML = `<input type="checkbox" value="${esc(name)}" checked /> <span>${esc(name)}</span>`;
+        notePickerEl.appendChild(row);
+      });
+    }
+
+    async function refreshNotes() {
+      if (!currentUser) return;
+      notesStatusEl.textContent = "Loading notes…";
+      try {
+        const endpoint = `${notesEndpoint}/${encodeURIComponent(currentUser)}`;
+        console.log("Fetching notes from", endpoint);
+        const res = await fetch(endpoint);
+        const data = await res.json();
+        renderNotes(data.notes || []);
+      } catch (e) {
+        notesStatusEl.textContent = "Could not load notes: " + e.message;
+      }
     }
 
 
@@ -256,6 +332,7 @@
         modal.style.display = "none";
         addMsg("bot", `Welcome, ${currentUser}. Ask me anything about your notes.`);
         setUploadButtonState();
+        refreshNotes();
       }
 
       btn.addEventListener("click", submit);
@@ -278,22 +355,23 @@
       const typing = addTyping();
 
       try {
-        const res = await fetch(API, {
+        const res = await fetch(generateEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(params),
         });
         const data = await res.json();
+        console.log("Response data:", data);
         typing.remove();
 
         if (!res.ok) {
           addMsg("err", data.detail || `HTTP ${res.status}`);
         } else if (data.returncode !== 0) {
-          addMsg("err", data.output || "Script exited with non-zero code.");
-          addDebug(data.stderr);
+          addMsg("err", data.response || "Script exited with non-zero code.");
+          addDebug(data.debug);
         } else {
-          addMsg("bot", data.output);
-          addDebug(data.stderr); // only visible if debug_grounding is on
+          addMsg("bot", data.response);
+          addDebug(data.debug); // only visible if user expands the dropdown
         }
       } catch (e) {
         typing.remove();
@@ -320,7 +398,7 @@
       statusEl.textContent = "Uploading…";
 
       try {
-        const res = await fetch(CONFIG.API.replace("/generate", "/uploadfile/"), {
+        const res = await fetch(uploadEndpoint, {
           method: "POST",
           body: formData,
         });
@@ -330,10 +408,19 @@
         } else {
           statusEl.textContent = data.message;
           fileInput.value = "";
+          refreshNotes();
         }
       } catch (e) {
         statusEl.textContent = "Could not reach server: " + e.message;
       }
+    });
+
+    document.getElementById("notes-select-all").addEventListener("click", () => {
+      notePickerEl.querySelectorAll('input[type="checkbox"]').forEach((el) => (el.checked = true));
+    });
+
+    document.getElementById("notes-clear-all").addEventListener("click", () => {
+      notePickerEl.querySelectorAll('input[type="checkbox"]').forEach((el) => (el.checked = false));
     });
   </script>
 </body>

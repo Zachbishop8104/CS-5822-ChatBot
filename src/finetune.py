@@ -1,13 +1,12 @@
-# So at this point the model has learned how to predict the next token in general
-# but it has no idea that it is a chat bot or how to answer questions.
-# This file will finetune the model on a smaller dataset of Q&A pairs to teach it how to answer questions.
+# finetune.py
+# Fine-tunes the pretrained model on context-based [NOTE_QA] QA pairs.
+# The model only learns to predict the answer tokens — prompt tokens are masked.
 
 import torch
 import torch.nn as nn
 from model import Model
 from tokenizer import load
 from pathlib import Path
-import sys
 from finetune_get_data import load_all_qa_blocks
 import numpy as np
 import argparse
@@ -16,154 +15,222 @@ from torch.optim.lr_scheduler import LambdaLR
 
 MODEL_DIR = Path(__file__).parent.parent / "model_state"
 
-def _load_qa_examples():
-    """Load QA blocks from all .txt files in the QA folder."""
-    return load_all_qa_blocks()
+
+# ---------------------------------------------------------------------------
+# Checkpoint helpers
+# ---------------------------------------------------------------------------
+
+def _normalize_state_dict(state_dict: dict) -> dict:
+    """Strip torch.compile '_orig_mod.' prefix if present."""
+    if any(k.startswith("_orig_mod.") for k in state_dict):
+        return {k.removeprefix("_orig_mod."): v for k, v in state_dict.items()}
+    return state_dict
 
 
-def load_qa_tokens(val_ratio=0.05):
-    tok = load()
-    bos_id = tok.token_to_id("[BOS]")
-    eos_id = tok.token_to_id("[EOS]")
+# ---------------------------------------------------------------------------
+# Data loading
+# ---------------------------------------------------------------------------
 
-    examples = _load_qa_examples()
+def load_qa_pairs(val_ratio: float = 0.05):
+    """
+    Parse [NOTE_QA] blocks into (prompt, answer) pairs.
+    prompt  = everything up to and including 'Answer:'
+    answer  = the text that follows 'Answer:'
+    """
+    examples = load_all_qa_blocks()
     if len(examples) < 2:
-        raise ValueError("Need at least 2 QA examples for train/val split.")
+        raise ValueError(
+            f"Only {len(examples)} QA blocks found. "
+            "Run `python finetune_get_data.py` first to download data."
+        )
 
-    encoded = []
-    for ex in examples:
-        ids = tok.encode(ex).ids
-        if bos_id is not None:
-            ids = [bos_id] + ids
-        if eos_id is not None:
-            ids = ids + [eos_id]
-        encoded.append(ids)
+    pairs = []
+    skipped = 0
+    for block in examples:
+        idx = block.rfind("Answer:")
+        if idx == -1:
+            skipped += 1
+            continue
+        prompt = block[:idx + len("Answer:")].strip()   # include the "Answer:" token
+        answer = block[idx + len("Answer:"):].strip()
+        answer = answer.split("\n\n")[0].strip()        # stop at first blank line
+        if prompt and answer:
+            pairs.append((prompt, answer))
+        else:
+            skipped += 1
+
+    if skipped:
+        print(f"  (skipped {skipped} malformed blocks)")
 
     rng = np.random.default_rng(42)
-    encoded = [encoded[i] for i in rng.permutation(len(encoded))]
+    pairs = [pairs[i] for i in rng.permutation(len(pairs))]
 
-    split_idx = int(len(encoded) * (1 - val_ratio))
-    split_idx = max(1, min(split_idx, len(encoded) - 1))
+    split = max(1, min(int(len(pairs) * (1 - val_ratio)), len(pairs) - 1))
+    return pairs[:split], pairs[split:], len(pairs)
 
-    train_tokens = [tid for sample in encoded[:split_idx] for tid in sample]
-    val_tokens = [tid for sample in encoded[split_idx:] for tid in sample]
+
+# ---------------------------------------------------------------------------
+# Batching
+# ---------------------------------------------------------------------------
+
+def get_batch(pairs, tok, batch_size: int, seq_len: int, bos_id, eos_id):
+    """
+    Sample batch_size (prompt, answer) pairs and encode them.
+    Returns:
+        input_ids : (batch, seq_len)  long tensor
+        mask      : (batch, seq_len)  bool tensor — True where loss should fire (answer tokens)
+    """
+    pad_id = tok.token_to_id("[PAD]") or 0
+    indices = np.random.choice(len(pairs), batch_size, replace=len(pairs) < batch_size)
+
+    input_batch, mask_batch = [], []
+    for idx in indices:
+        prompt, answer = pairs[idx]
+
+        prompt_ids = tok.encode(prompt).ids
+        answer_ids = tok.encode(answer).ids
+
+        if bos_id is not None:
+            prompt_ids = [bos_id] + prompt_ids
+        if eos_id is not None:
+            answer_ids = answer_ids + [eos_id]
+
+        # Truncate: preserve as much answer as possible
+        total = len(prompt_ids) + len(answer_ids)
+        if total > seq_len:
+            budget = seq_len - len(answer_ids)
+            if budget > 0:
+                prompt_ids = prompt_ids[-budget:]
+            else:
+                prompt_ids = []
+                answer_ids = answer_ids[-seq_len:]
+
+        ids  = prompt_ids + answer_ids
+        mask = [0] * len(prompt_ids) + [1] * len(answer_ids)
+
+        # Pad
+        pad = seq_len - len(ids)
+        if pad > 0:
+            ids  += [pad_id] * pad
+            mask += [0] * pad
+
+        input_batch.append(ids)
+        mask_batch.append(mask)
 
     return (
-        np.array(train_tokens, dtype=np.uint16),
-        np.array(val_tokens, dtype=np.uint16),
-        len(examples),
+        torch.tensor(input_batch, dtype=torch.long),
+        torch.tensor(mask_batch,  dtype=torch.bool),
     )
 
-def get_batch(tokens, batch_size=32, seq_len=256):
-    if len(tokens) <= seq_len + 1:
-        raise ValueError(
-            f"Token stream too short for seq_len={seq_len}. Got {len(tokens):,} tokens."
-        )
 
-    indices = torch.randint(0, len(tokens) - seq_len - 1, (batch_size,))
-    input_batch  = torch.stack([torch.from_numpy(tokens[i:i+seq_len].astype(np.int64)) for i in indices])
-    target_batch = torch.stack([torch.from_numpy(tokens[i+1:i+seq_len+1].astype(np.int64)) for i in indices])
-    return input_batch, target_batch
-
-
-def evaluate(model, tokens, loss_fn, vocab_size, device, batch_size, seq_len, steps=20):
-    model.eval()
-    total = 0.0
-    with torch.no_grad():
-        for _ in range(steps):
-            input_batch, targets = get_batch(tokens, batch_size=batch_size, seq_len=seq_len)
-            input_batch = input_batch.to(device, non_blocking=True)
-            targets = targets.to(device, non_blocking=True)
-
-            with amp.autocast(device_type=device.type):
-                logits = model(input_batch)
-                loss = loss_fn(logits.view(-1, vocab_size), targets.view(-1))
-            total += loss.item()
-    model.train()
-    return total / steps
-
+# ---------------------------------------------------------------------------
+# Training
+# ---------------------------------------------------------------------------
 
 def finetune(
-    model_file_name,
-    steps=9000,
-    batch_size=32,
-    seq_len=256,
-    lr=1e-5,
-    eval_interval=200,
-    val_ratio=0.05,
-    early_stop_patience=12,
+    model_file_name: str,
+    steps: int       = 9_000,
+    batch_size: int  = 32,
+    seq_len: int     = 256,
+    lr: float        = 1e-5,
+    eval_interval: int       = 200,
+    val_ratio: float         = 0.05,
+    early_stop_patience: int = 100,
 ):
-    tok = load()
+    tok        = load()
     vocab_size = tok.get_vocab_size()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    bos_id     = tok.token_to_id("[BOS]")
+    eos_id     = tok.token_to_id("[EOS]")
+    device     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    checkpoint = torch.load(MODEL_DIR / model_file_name, map_location="cpu", weights_only=True)
-    ckpt_vocab_size = int(checkpoint["model"]["embedding.embedding.weight"].shape[0])
-    if ckpt_vocab_size != vocab_size:
+    # -- Load checkpoint --
+    ckpt_path = MODEL_DIR / model_file_name
+    if not ckpt_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+
+    checkpoint  = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    state       = _normalize_state_dict(checkpoint["model"])
+
+    emb_key = "embedding.embedding.weight"
+    if emb_key not in state:
+        raise KeyError(f"Missing key '{emb_key}' in checkpoint after normalisation.")
+    if int(state[emb_key].shape[0]) != vocab_size:
         raise ValueError(
-            f"Tokenizer vocab ({vocab_size}) does not match checkpoint vocab ({ckpt_vocab_size}) in {model_file_name}. "
-            "Use a checkpoint trained with the current tokenizer or retrain first."
+            f"Vocab mismatch: tokenizer={vocab_size}, "
+            f"checkpoint={state[emb_key].shape[0]}"
         )
 
-    # must match the architecture of the pretrained model
-    model = Model(vocab_size=vocab_size, embed_dim=768, num_heads=12, num_layers=8, dropout=0.1)
-    model.load_state_dict(checkpoint["model"])
+    model = Model(
+        vocab_size=vocab_size,
+        embed_dim=768,
+        num_heads=12,
+        num_layers=8,
+        dropout=0.1,
+    )
+    model.load_state_dict(state)
     model.to(device)
 
-    WARMUP = 500
-
-    # lower learning rate for fine-tuning
+    # -- Optimiser & scheduler --
+    WARMUP    = 500
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     scheduler = LambdaLR(optimizer, lambda s: min(1.0, s / WARMUP))
-    loss_fn = nn.CrossEntropyLoss()
-    scaler = amp.GradScaler(enabled=(device.type == "cuda"))
+    loss_fn   = nn.CrossEntropyLoss()
+    scaler    = amp.GradScaler(enabled=(device.type == "cuda"))
 
-    print("Loading Q&A tokens...")
-    train_tokens, val_tokens, n_examples = load_qa_tokens(val_ratio=val_ratio)
+    # -- Data --
+    print("Loading QA pairs...")
+    train_pairs, val_pairs, n_total = load_qa_pairs(val_ratio)
     print(
-        f"Q&A examples: {n_examples:,} | train_tokens: {len(train_tokens):,} | "
-        f"val_tokens: {len(val_tokens):,}"
+        f"  Total: {n_total:,}  |  train: {len(train_pairs):,}  |  val: {len(val_pairs):,}"
     )
-
-    if len(train_tokens) <= seq_len + 1 or len(val_tokens) <= seq_len + 1:
-        raise ValueError(
-            "QA token stream too short for current seq_len. "
-            "Lower seq_len or increase QA data."
-        )
+    if not train_pairs or not val_pairs:
+        raise ValueError("Not enough QA pairs for train/val split.")
 
     print(
-        f"Fine-tune config | model={model_file_name} steps={steps:,} "
-        f"batch_size={batch_size} seq_len={seq_len} lr={lr:.2e}"
+        f"\nFine-tune config | model={model_file_name}  steps={steps:,}  "
+        f"batch={batch_size}  seq_len={seq_len}  lr={lr:.2e}  device={device}"
     )
 
-    import os
-    best_val_loss = float("inf")
-    best_step = -1
-    bad_eval_count = 0
-    base_output_name = "Model_finetuned_best.pth"
-    def get_unique_output_path(base_name):
-        output_path = MODEL_DIR / base_name
-        if not output_path.exists():
-            return output_path
-        stem = base_name.rsplit('.', 1)[0]
-        ext = base_name.rsplit('.', 1)[1] if '.' in base_name else ''
+    # -- Output path --
+    def unique_path(base: str) -> Path:
+        p = MODEL_DIR / base
+        if not p.exists():
+            return p
+        stem, ext = base.rsplit(".", 1) if "." in base else (base, "")
         i = 1
         while True:
-            numbered = f"{stem}_{i}.{ext}" if ext else f"{stem}_{i}"
-            candidate = MODEL_DIR / numbered
+            candidate = MODEL_DIR / (f"{stem}_{i}.{ext}" if ext else f"{stem}_{i}")
             if not candidate.exists():
                 return candidate
             i += 1
-    best_output_path = get_unique_output_path(base_output_name)
 
+    out_path       = unique_path("Model_finetuned_best.pth")
+    best_val_loss  = float("inf")
+    best_step      = -1
+    bad_eval_count = 0
+
+    # -- Training loop --
     for step in range(steps):
-        input_batch, targets = get_batch(train_tokens, batch_size=batch_size, seq_len=seq_len)
-        input_batch = input_batch.to(device, non_blocking=True)
-        targets = targets.to(device, non_blocking=True)
+        model.train()
+        x, mask = get_batch(train_pairs, tok, batch_size, seq_len, bos_id, eos_id)
+        x    = x.to(device, non_blocking=True)
+        mask = mask.to(device, non_blocking=True)
 
         with amp.autocast(device_type=device.type):
-            logits = model(input_batch)
-            loss = loss_fn(logits.view(-1, vocab_size), targets.view(-1))
+            logits = model(x)                          # (B, T, V)
+            # Causal shift: predict token t+1 from token t
+            logits_s = logits[:, :-1, :].contiguous()  # (B, T-1, V)
+            targets  = x[:, 1:].contiguous()           # (B, T-1)
+            mask_s   = mask[:, 1:].contiguous()        # (B, T-1)
+
+            # Only backprop through answer tokens
+            active_logits  = logits_s.view(-1, vocab_size)[mask_s.view(-1)]
+            active_targets = targets.view(-1)[mask_s.view(-1)]
+
+            if active_targets.numel() == 0:
+                continue  # skip degenerate batch (shouldn't happen)
+
+            loss = loss_fn(active_logits, active_targets)
 
         optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
@@ -172,74 +239,91 @@ def finetune(
         scaler.step(optimizer)
         scaler.update()
         scheduler.step()
-        
+
+        # -- Validation --
         if step % eval_interval == 0:
-            val_loss = evaluate(
-                model,
-                val_tokens,
-                loss_fn,
-                vocab_size,
-                device,
-                batch_size=batch_size,
-                seq_len=seq_len,
-                steps=20,
+            model.eval()
+            val_losses = []
+            with torch.no_grad():
+                for _ in range(10):
+                    vx, vmask = get_batch(val_pairs, tok, batch_size, seq_len, bos_id, eos_id)
+                    vx    = vx.to(device, non_blocking=True)
+                    vmask = vmask.to(device, non_blocking=True)
+
+                    with amp.autocast(device_type=device.type):
+                        vlogits  = model(vx)[:, :-1, :].contiguous()
+                        vtargets = vx[:, 1:].contiguous()
+                        vmask_s  = vmask[:, 1:].contiguous()
+
+                        al = vlogits.view(-1, vocab_size)[vmask_s.view(-1)]
+                        at = vtargets.view(-1)[vmask_s.view(-1)]
+                        if at.numel() > 0:
+                            val_losses.append(loss_fn(al, at).item())
+
+            val_loss = float(np.mean(val_losses)) if val_losses else float("inf")
+            print(
+                f"Step {step:5d} | train_loss: {loss.item():.4f} | val_loss: {val_loss:.4f}"
             )
-            print(f"Step {step:4d} | Train Loss: {loss.item():.4f} | Val Loss: {val_loss:.4f}")
 
             if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_step = step
+                best_val_loss  = val_loss
+                best_step      = step
                 bad_eval_count = 0
-                # Save to a unique file if not already saved
                 torch.save(
                     {
-                        "model": model.state_dict(),
-                        "optimizer": optimizer.state_dict(),
+                        "model":      model.state_dict(),
+                        "optimizer":  optimizer.state_dict(),
                         "base_model": model_file_name,
-                        "steps": step,
+                        "step":       step,
                         "batch_size": batch_size,
-                        "seq_len": seq_len,
-                        "lr": lr,
-                        "val_loss": val_loss,
+                        "seq_len":    seq_len,
+                        "lr":         lr,
+                        "val_loss":   val_loss,
                     },
-                    best_output_path,
+                    out_path,
                 )
-                print(f"*New best val loss: {val_loss:.4f} @ step {step} (saved to {best_output_path.name})")
+                print(f"  * New best val_loss {val_loss:.4f} @ step {step}  →  {out_path.name}")
             else:
                 bad_eval_count += 1
                 if early_stop_patience > 0 and bad_eval_count >= early_stop_patience:
                     print(
-                        f"Early stopping at step {step}: no val improvement for "
-                        f"{bad_eval_count} evals."
+                        f"Early stop: no improvement for {bad_eval_count} evals "
+                        f"({bad_eval_count * eval_interval} steps)."
                     )
                     break
-    if best_step >= 0:
-        print(
-            f"Best finetuned model: {best_output_path.name} "
-            f"(step {best_step}, val_loss {best_val_loss:.4f})"
-        )
-    else:
-        raise RuntimeError("No validation step ran; no finetuned model was saved.")
+
+    if best_step < 0:
+        raise RuntimeError("No validation step ran — no model was saved.")
+
+    print(
+        f"\nDone. Best model: {out_path.name}  "
+        f"(step {best_step}, val_loss {best_val_loss:.4f})"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_file_name", default="Model_best.pth")
-    parser.add_argument("--steps", type=int, default=9000)
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--seq_len", type=int, default=256)
-    parser.add_argument("--lr", type=float, default=1e-5)
-    parser.add_argument("--eval_interval", type=int, default=200)
-    parser.add_argument("--val_ratio", type=float, default=0.05)
-    parser.add_argument("--early_stop_patience", type=int, default=12)
+    parser.add_argument("--model_file_name",      default="Model_best.pth")
+    parser.add_argument("--steps",                type=int,   default=9_000)
+    parser.add_argument("--batch_size",           type=int,   default=32)
+    parser.add_argument("--seq_len",              type=int,   default=256)
+    parser.add_argument("--lr",                   type=float, default=1e-5)
+    parser.add_argument("--eval_interval",        type=int,   default=200)
+    parser.add_argument("--val_ratio",            type=float, default=0.05)
+    parser.add_argument("--early_stop_patience",  type=int,   default=100)
     args = parser.parse_args()
 
     finetune(
-        model_file_name=args.model_file_name,
-        steps=args.steps,
-        batch_size=args.batch_size,
-        seq_len=args.seq_len,
-        lr=args.lr,
-        eval_interval=args.eval_interval,
-        val_ratio=args.val_ratio,
-        early_stop_patience=args.early_stop_patience,
+        model_file_name     = args.model_file_name,
+        steps               = args.steps,
+        batch_size          = args.batch_size,
+        seq_len             = args.seq_len,
+        lr                  = args.lr,
+        eval_interval       = args.eval_interval,
+        val_ratio           = args.val_ratio,
+        early_stop_patience = args.early_stop_patience,
     )

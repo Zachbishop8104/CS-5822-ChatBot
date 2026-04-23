@@ -4,6 +4,8 @@ import io
 from pathlib import Path
 from fastapi import UploadFile
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 def extract_text_from_bytes(filename: str, contents: bytes) -> str:
     suffix = Path(filename).suffix.lower()
 
@@ -27,7 +29,14 @@ def extract_text_from_bytes(filename: str, contents: bytes) -> str:
         for slide in prs.slides:
             for shape in slide.shapes:
                 if hasattr(shape, "text") and shape.text.strip():
-                    lines.append(shape.text.strip())
+                    shape_text = shape.text.strip()
+                    # Skip shapes that look like diagram notation
+                    # (short text with no real words)
+                    words = shape_text.split()
+                    real_words = sum(1 for w in words if re.match(r'[a-zA-Z]{3,}', w))
+                    if len(words) > 0 and real_words / len(words) < 0.4:
+                        continue
+                    lines.append(shape_text)
         return "\n".join(lines)
 
     elif suffix == ".rtf":
@@ -44,7 +53,15 @@ def extract_text_from_bytes(filename: str, contents: bytes) -> str:
 
 
 def normalize_text(text: str) -> str:
+    # Fix hyphenated line breaks
+    text = re.sub(r"-\n\s*", "", text)
+    # Join lines that are part of the same sentence
+    text = re.sub(r"(?<=[a-z])\n(?=[a-z])", " ", text)
+    # Strip bullet characters at line starts
+    text = re.sub(r"(?m)^[\s]*[•\-\*]\s*", "", text)
+    # Collapse multiple spaces
     text = re.sub(r"[ \t]+", " ", text)
+    # Collapse excessive blank lines
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -52,12 +69,12 @@ def normalize_text(text: str) -> str:
 async def download_note(file: UploadFile, user_id: str):
     contents = await file.read()
 
-    user_dir = f"../users/{user_id}"
+    user_dir = BASE_DIR / "users" / user_id
     os.makedirs(user_dir, exist_ok=True)
 
     # save only the normalized .txt
     txt_filename = Path(file.filename).stem + ".txt"
-    txt_path = os.path.join(user_dir, txt_filename)
+    txt_path = user_dir / txt_filename
 
     if os.path.exists(txt_path):
         return {"error": "File already exists"}

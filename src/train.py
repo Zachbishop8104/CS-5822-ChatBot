@@ -90,6 +90,12 @@ def _load_checkpoint_if_available(model, optimizer, scheduler, model_name):
     return start_step, best_val_loss, best_step
 
 
+def _model_state_dict(model):
+    """Return base model weights even when torch.compile wraps the module."""
+    base_model = getattr(model, "_orig_mod", model)
+    return base_model.state_dict()
+
+
 def train_model(
     steps=STEPS,
     batch_size=BATCH_SIZE,
@@ -210,7 +216,7 @@ def train_model(
                 best_step = step
                 torch.save(
                     {
-                        "model": model.state_dict(),
+                        "model": _model_state_dict(model),
                         "optimizer": optimizer.state_dict(),
                         "scheduler": scheduler.state_dict(),
                         "step": step,
@@ -223,7 +229,7 @@ def train_model(
 
     torch.save(
         {
-            "model": model.state_dict(),
+            "model": _model_state_dict(model),
             "optimizer": optimizer.state_dict(),
             "scheduler": scheduler.state_dict(),
             "step": steps - 1,

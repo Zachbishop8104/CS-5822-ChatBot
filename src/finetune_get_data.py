@@ -1,174 +1,229 @@
 from datasets import load_dataset
 from pathlib import Path
-from tokenizer import load
+import re
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+hf_token = os.getenv("HF_TOKEN")
+if hf_token:
+    os.environ["HF_TOKEN"] = hf_token
 
 QA_DIR = Path(__file__).parent.parent / "raw_text" / "qa"
 QA_DIR.mkdir(parents=True, exist_ok=True)
 
-# List of QA datasets: (dataset_name, config, split, output_file, n_samples)
+MIN_ANSWER_WORDS  = 5
+MIN_CONTEXT_WORDS = 20
+
+# (hf_dataset_name, config_or_None, split, output_file, n_samples)
 SOURCES = [
-    ("squad_v2", None, "train", "squad.txt", 12_000),
-    ("openbookqa", "main", "train", "openbookqa.txt", 5_000),
-    ("blended_skill_talk", None, "train", "blended_skill_talk.txt", 12_000),
-    ("trivia_qa", "rc", "train", "triviaqa.txt", 12_000),
-    ("natural_questions", "default", "train", "natural_questions.txt", 12_000),
-    ("boolq", None, "train", "boolq.txt", 12_000),
-    ("ai2_arc", "ARC-Challenge", "train", "arc_challenge.txt", 1_119),
-    ("ai2_arc", "ARC-Easy", "train", "arc_easy.txt", 2_251),
-    ("pubmed_qa", "pqa_labeled", "train", "pubmed_qa.txt", 1_000),
+    ("squad_v2",    None,          "train", "squad.txt",        15_000),
+    ("narrativeqa", None,          "train", "narrativeqa.txt",   8_000),
+    ("newsqa",      None,          "train", "newsqa.txt",        8_000),
+    ("hotpot_qa",   "distractor",  "train", "hotpotqa.txt",     10_000),
+    ("pubmed_qa",   "pqa_labeled", "train", "pubmed_qa.txt",     1_000),
+    ("ms_marco",    "v1.1",        "train", "ms_marco.txt",     12_000),
 ]
 
 ACTIVE_QA_FILES = [out_file for _, _, _, out_file, _ in SOURCES]
 
-def extract_qa(ex, dataset):
-    """Extract context, question, answer from a dataset example."""
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _clean(text) -> str:
+    if not isinstance(text, str):
+        text = str(text) if text is not None else ""
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _truncate(text: str, max_words: int = 120) -> str:
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    return " ".join(words[:max_words]) + "..."
+
+
+# ---------------------------------------------------------------------------
+# Per-dataset extractors  ->  (context, question, answer) or None
+# ---------------------------------------------------------------------------
+
+def _extract(ex, dataset: str):
+
     if dataset == "squad_v2":
-        context = ex.get("context", "").strip()
-        question = ex.get("question", "").strip()
-        answers = ex.get("answers", {}).get("text", [])
-        answer = answers[0] if answers else ""
+        context  = _clean(ex.get("context", ""))
+        question = _clean(ex.get("question", ""))
+        answers  = ex.get("answers", {}).get("text", [])
+        answer   = _clean(answers[0]) if answers else ""
+        if not answer:
+            return None
         return context, question, answer
-    elif dataset == "openbookqa":
-        question = ex.get("question_stem", "").strip()
-        choices = ex.get("choices", {}).get("text", [])
-        answer_idx = ex.get("answerKey", "A")
-        # OpenBookQA uses answerKey as letter, choices as list
-        idx = ord(answer_idx) - ord("A")
-        answer = choices[idx] if idx < len(choices) else ""
-        context = ""
-        return context, question, answer
-    elif dataset == "blended_skill_talk":
-        prev = ex.get("previous_utterance", "")
-        if isinstance(prev, list):
-            context = " ".join(p.strip() for p in prev if isinstance(p, str)).strip()
-        elif isinstance(prev, str):
-            context = prev.strip()
+
+    elif dataset == "narrativeqa":
+        doc = ex.get("document", {})
+        if isinstance(doc, dict):
+            summary = doc.get("summary", {})
+            context = _clean(
+                summary.get("text", "") if isinstance(summary, dict) else str(summary)
+            )
         else:
             context = ""
-        free_msgs = ex.get("free_messages", [""])
-        guided_msgs = ex.get("guided_messages", [""])
-        question = free_msgs[0].strip() if free_msgs and isinstance(free_msgs[0], str) else ""
-        answer = guided_msgs[0].strip() if guided_msgs and isinstance(guided_msgs[0], str) else ""
+        question = _clean(
+            ex.get("question", {}).get("text", "")
+            if isinstance(ex.get("question"), dict) else ""
+        )
+        ans_list = ex.get("answers", [])
+        answer   = _clean(
+            ans_list[0].get("text", "")
+            if ans_list and isinstance(ans_list[0], dict) else ""
+        )
+        if not answer:
+            return None
         return context, question, answer
-    elif dataset == "trivia_qa":
-        question = ex.get("question", "").strip()
-        answer = ex.get("answer", {}).get("value", "").strip()
-        context = ""
-        return context, question, answer
-    elif dataset == "natural_questions":
-        question = ex.get("question", {}).get("text", "").strip()
-        annotations = ex.get("annotations", {}).get("short_answers", [])
-        text_list = annotations[0].get("text", []) if annotations else []
-        answer = text_list[0] if text_list else ""
-        context = ""
-        return context, question, answer
-    elif dataset == "boolq":
-        question = ex.get("question", "").strip()
-        context = ex.get("passage", "").strip()
-        answer_val = ex.get("answer", None)
-        if isinstance(answer_val, bool):
-            answer = "yes" if answer_val else "no"
-        else:
-            answer = str(answer_val).strip() if answer_val is not None else ""
-        return context, question, answer
-    elif dataset == "ai2_arc":
-        question = ex.get("question", "").strip()
-        choices = ex.get("choices", {})
-        labels = choices.get("label", []) if isinstance(choices, dict) else []
-        texts = choices.get("text", []) if isinstance(choices, dict) else []
-        answer_key = str(ex.get("answerKey", "")).strip()
-        answer = ""
-        if answer_key in labels:
-            idx = labels.index(answer_key)
-            answer = texts[idx].strip() if idx < len(texts) else ""
-        elif answer_key.isdigit():
-            idx = int(answer_key) - 1
-            if 0 <= idx < len(texts):
-                answer = texts[idx].strip()
-        context = ""
-        return context, question, answer
-    elif dataset == "pubmed_qa":
-        question = ex.get("question", "").strip()
-        context_obj = ex.get("context", {})
-        contexts = context_obj.get("contexts", []) if isinstance(context_obj, dict) else []
-        context = " ".join(c.strip() for c in contexts if isinstance(c, str) and c.strip())
-        answer = str(ex.get("final_decision", "")).strip().lower()
-        return context, question, answer
-    elif dataset == "eli5":
-        question = ex.get("title", "").strip()
-        context = ex.get("selftext", "").strip()
-        if not question and context:
-            question, context = context, ""
-        answers = ex.get("answers", {})
-        answer_texts = answers.get("text", []) if isinstance(answers, dict) else []
-        answer_scores = answers.get("score", []) if isinstance(answers, dict) else []
-        if answer_texts:
-            if answer_scores and len(answer_scores) == len(answer_texts):
-                best_idx = max(range(len(answer_scores)), key=answer_scores.__getitem__)
-                answer = answer_texts[best_idx].strip()
-            else:
-                answer = answer_texts[0].strip()
-        else:
-            answer = ""
-        return context, question, answer
-    elif dataset == "cosmos_qa":
-        context = ex.get("context", "").strip()
-        question = ex.get("question", "").strip()
-        choices = [ex.get("answer0", ""), ex.get("answer1", ""), ex.get("answer2", ""), ex.get("answer3", "")]
-        label = ex.get("label", -1)
-        answer = ""
-        if isinstance(label, int) and 0 <= label < len(choices):
-            answer = str(choices[label]).strip()
-        return context, question, answer
-    return "", "", ""
 
+    elif dataset == "newsqa":
+        context   = _clean(ex.get("story_text", ""))
+        question  = _clean(ex.get("question", ""))
+        answers   = ex.get("answers", {})
+        ans_texts = answers.get("text", []) if isinstance(answers, dict) else []
+        answer    = _clean(ans_texts[0]) if ans_texts else ""
+        if not answer:
+            return None
+        return context, question, answer
+
+    elif dataset == "hotpot_qa":
+        ctx_obj   = ex.get("context", {})
+        sentences = ctx_obj.get("sentences", []) if isinstance(ctx_obj, dict) else []
+        flat = []
+        for sent_list in sentences:
+            if isinstance(sent_list, list):
+                flat.extend(sent_list)
+            elif isinstance(sent_list, str):
+                flat.append(sent_list)
+        context  = _clean(" ".join(flat))
+        question = _clean(ex.get("question", ""))
+        answer   = _clean(ex.get("answer", ""))
+        if not answer:
+            return None
+        return context, question, answer
+
+    elif dataset == "pubmed_qa":
+        question  = _clean(ex.get("question", ""))
+        ctx_obj   = ex.get("context", {})
+        ctx_parts = ctx_obj.get("contexts", []) if isinstance(ctx_obj, dict) else []
+        context   = _clean(" ".join(c for c in ctx_parts if isinstance(c, str)))
+        answer    = _clean(str(ex.get("final_decision", ""))).lower()
+        expand    = {
+            "yes":   "Yes, the evidence provided supports this conclusion.",
+            "no":    "No, the evidence does not support this conclusion.",
+            "maybe": "The evidence is mixed and a definitive answer is unclear.",
+        }
+        answer = expand.get(answer, answer)
+        return context, question, answer
+
+    elif dataset == "ms_marco":
+        passages_obj  = ex.get("passages", {})
+        passage_texts = (
+            passages_obj.get("passage_text", [])
+            if isinstance(passages_obj, dict) else []
+        )
+        context  = _clean(passage_texts[0]) if passage_texts else ""
+        question = _clean(ex.get("query", ""))
+        answers  = ex.get("answers", [])
+        answer   = _clean(answers[0]) if answers else ""
+        if not answer or answer.lower() in {"no answer present.", "no answer present"}:
+            return None
+        return context, question, answer
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Format a single block
+# ---------------------------------------------------------------------------
+
+def _format_block(context: str, question: str, answer: str) -> str:
+    context = _truncate(context, max_words=120)
+    return (
+        f"[NOTE_QA]\n"
+        f"Context: {context}\n"
+        f"Question: {question}\n"
+        f"Answer: {answer}\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main download + write
+# ---------------------------------------------------------------------------
 
 def dump_qa_bulk():
-    tok = load()
     for name, config, split, out_file, n_samples in SOURCES:
-        print(f"Processing {name}...")
+        print(f"\nProcessing {name} ({'default' if config is None else config})...")
         kwargs = {"streaming": True}
         if config:
             kwargs["name"] = config
         try:
-            ds = load_dataset(name, split=split, **kwargs)
-        except RuntimeError as e:
-            if "Dataset scripts are no longer supported" in str(e):
-                print(f"Skipping {name}: unsupported dataset script in installed datasets version")
-                continue
-            raise
+            ds = load_dataset(name, split=split, trust_remote_code=True, **kwargs)
+        except Exception as e:
+            print(f"  Skipping {name}: {e}")
+            continue
+
         out_path = QA_DIR / out_file
-        count = 0
+        count   = 0
+        skipped = 0
+
         with open(out_path, "w", encoding="utf-8") as f:
             for ex in ds:
-                context, question, answer = extract_qa(ex, name)
-                if question and answer:
-                    line = (
-                        (f"Context: {context}\n" if context else "") +
-                        f"Question: {question}\n"
-                        f"Answer: {answer}\n\n"
-                    )
-                    f.write(line)
-                    count += 1
+                result = _extract(ex, name)
+                if result is None:
+                    skipped += 1
+                    continue
+
+                context, question, answer = result
+
+                if not (context and question and answer):
+                    skipped += 1
+                    continue
+                if len(context.split()) < MIN_CONTEXT_WORDS:
+                    skipped += 1
+                    continue
+                if len(answer.split()) < MIN_ANSWER_WORDS:
+                    skipped += 1
+                    continue
+
+                f.write(_format_block(context, question, answer))
+                f.write("\n")
+                count += 1
                 if count >= n_samples:
                     break
-        print(f"Saved {count} Q&A pairs -> {out_path}")
 
-def load_all_qa_blocks(source_files=None):
-    """Return QA blocks from the active finetune source files."""
-    blocks = []
+        print(f"  Saved {count:,} blocks (skipped {skipped:,}) -> {out_path}")
+
+    print("\nDone.")
+
+
+# ---------------------------------------------------------------------------
+# Loader used by finetune.py
+# ---------------------------------------------------------------------------
+
+def load_all_qa_blocks(source_files=None) -> list[str]:
     if source_files is None:
         source_files = ACTIVE_QA_FILES
+
+    blocks = []
     for file_name in source_files:
         file = QA_DIR / file_name
         if not file.exists():
             continue
-        with open(file, "r", encoding="utf-8") as f:
-            text = f.read().strip()
-            if text:
-                file_blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
-                blocks.extend(file_blocks)
+        text = file.read_text(encoding="utf-8").strip()
+        if text:
+            file_blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
+            blocks.extend(file_blocks)
+
     return blocks
+
 
 if __name__ == "__main__":
     dump_qa_bulk()
