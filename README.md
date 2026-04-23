@@ -1,138 +1,50 @@
-# AI Study Companion with Class-Specific Knowledge
+## CS-5822 RAG
 
-## Quickstart
-
-Use this when you want the shortest path from setup to a working model.
+FastAPI server for the web UI. Wraps `generate.py` as a subprocess and handles note management.
 
 ```bash
-source ~/venv/bin/activate
-python tokenizer.py --test
-nohup python -u train.py --force > ../training.log 2>&1 &
-tail -f ../training.log
+uvicorn api_server:app --host 0.0.0.0 --port 8000
 ```
 
-After pretraining completes:
+---
 
-```bash
-python finetune_get_data.py
-nohup python -u finetune.py --model_file_name Model_best.pth --steps 5000 --batch_size 32 --seq_len 512 --lr 2e-5 --eval_interval 250 --val_ratio 0.05 > ../finetune.log 2>&1 &
-tail -f ../finetune.log
-```
+## Endpoints
 
-## Full Training Workflow
+### `POST /generate`
 
-### 1 Environment Setup
+Runs `generate.py` and returns the output.
 
-```bash
-source ~/venv/bin/activate
-cd ~/CS-5822-ChatBot
-```
+| Field | Type | Default |
+|---|---|---|
+| `prompt` | str | **required** |
+| `user_id` | str | **required** |
+| `model_file_name` | str | `Model_finetuned_best.pth` |
+| `temperature` | float | `0.01` |
+| `top_k` | int | `50` |
+| `top_p` | float | `0.92` |
+| `repetition_penalty` | float | `1.0` |
+| `max_new_tokens` | int | `80` |
+| `selected_note_files` | list[str] | `[]` |
 
-Recommended:
-1. Add Hugging Face token to `.env` as `HF_TOKEN=...` for faster and more reliable dataset access.
+Response: `{ "response": "...", "debug": "...", "returncode": 0 }`
 
-### 2 Tokenizer Workflow
+`response` is stdout (generated text). `debug` is stderr (tokenizer info + `[DEBUG]` lines).
 
-Run from `src`:
+---
 
-Dump raw text:
+### `GET /notes/{user_id}`
 
-```bash
-python tokenizer.py --dump
-```
+Lists `.txt` files in `users/{user_id}/`.
 
-Train tokenizer:
+Response: `{ "notes": ["file1.txt", "file2.txt"] }`
 
-The vocab size is that way since that is what my initial training landed on.
-You can change this but reccomended is more the better since hugging face BPE can auto stop when it can't mrege anymore.
-```bash
-python tokenizer.py --train --vocab_size 44705
-```
+---
 
-Validate tokenizer:
+### `POST /uploadfile/`
 
-```bash
-python tokenizer.py --test --text "What is photosynthesis and how does it work?"
-```
+Uploads a note file. Multipart form data.
 
-### 3 Build Token Bins
-
-Convert text from `raw_text` into `.bin` token files in `tokens`:
-
-```bash
-python bin_loader.py
-```
-
-### 4 Pretrain Base Model
-
-Run in background from `src`:
-
-```bash
-nohup python -u train.py --force > ../training.log 2>&1 &
-```
-
-Expected outputs in `model_state`:
-1. `Model_best.pth`
-2. `Model_finetuned_best.pth`
-
-### 5 Fine-Tune on QA Data
-
-Build QA dataset (SQuAD format with context):
-
-```bash
-python finetune_get_data.py
-```
-
-Fine-tune from pretrained best checkpoint:
-
-```bash
-nohup python -u finetune.py \
-  --model_file_name Model_best.pth \
-  --steps 5000 \
-  --batch_size 32 \
-  --seq_len 512 \
-  --lr 2e-5 \
-  --eval_interval 250 \
-  --val_ratio 0.05 \
-  > ../finetune.log 2>&1 &
-```
-
-Expected outputs in `model_state` after full pipeline:
-1. `Model_best.pth`
-3. `Model_finetuned_best.pth`
-
-## Inference and Grounding
-
-### Basic Generation
-
-```bash
-python generate.py --model_file_name Model_finetuned_best.pth
-```
-
-### Non-Interactive Prompt Mode
-
-```bash
-python generate.py --model_file_name Model_finetuned_best.pth --prompt "How hot is the sun?"
-```
-
-### Context-Grounded QA (Auto Fallback)
-
-```bash
-python generate.py \
-  --model_file_name Model_finetuned_best.pth \
-  --prompt "How hot is the sun?" \
-  --prepend_bos \
-  --temperature 0.1 \
-  --top_k 10 \
-  --max_new_tokens 80 \
-  --context "The Sun's photosphere is about 5,500 C, while its core reaches around 15 million C." \
-  --instruction "Answer in one sentence and include both photosphere and core temperatures with units." \
-  --auto_grounding \
-  --grounding_sentences 2 \
-  --debug_grounding
-```
-
-Grounding modes:
-1. `--strict_context_grounding`: always use extractive context grounding.
-2. `--auto_grounding`: generate first, then fallback to grounding if reliability checks fail.
-3. `--debug_grounding`: print source tag (`model`, `grounded-auto`, `grounded-strict`).
+| Field | Type |
+|---|---|
+| `file` | file |
+| `user_id` | str (default: `"default"`) |

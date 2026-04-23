@@ -23,20 +23,20 @@ app.add_middleware(
 class GenerateRequest(BaseModel):
     prompt: str
     model_file_name: str = "Model_finetuned_best.pth"
-    temperature: float = 0.01          # Updated default to greedy decoding
-    top_k: int = 50                    # Matched generate.py default
-    top_p: float = 0.92                # Matched generate.py default
-    repetition_penalty: float = 1.0    # Updated default to allow quoting
+    temperature: float = 0.01
+    top_k: int = 50
+    top_p: float = 0.92
+    repetition_penalty: float = 1.0
     max_new_tokens: int = 80
-    user_id: str = "default"           # Required for retrieval!
+    user_id: str = "default" # Required for retrieval
     selected_note_files: list[str] = Field(default_factory=list)
 
 @app.post("/generate")
 async def generate(req: GenerateRequest):
     args = [
-        "python", "generate.py", # Make sure this path points to generate.py
+        "python", "generate.py",
         "--prompt", req.prompt,
-        "--username", req.user_id,   # CRITICAL: Added the username argument
+        "--username", req.user_id,
         "--checkpoint", req.model_file_name,
         "--temperature", str(req.temperature),
         "--top_k", str(req.top_k),
@@ -54,7 +54,7 @@ async def generate(req: GenerateRequest):
         cwd=os.path.dirname(os.path.abspath(__file__))
     )
     
-    # stdout contains purely the generated text
+    # stdout contains the generated text
     response = proc.stdout.strip()
     
     # stderr contains the tokenizer info and all [DEBUG] lines

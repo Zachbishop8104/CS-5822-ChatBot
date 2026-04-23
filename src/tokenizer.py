@@ -1,12 +1,3 @@
-"""
-tokenizer.py. Train and load a BPE tokenizer using HuggingFace tokenizers.
-
-Usage:
-    python tokenizer.py --dump  --samples #        # step 1: pull raw text
-    python tokenizer.py --train --vocab_size #     # step 2: train tokenizer
-    python tokenizer.py --test                     # verify it works
-"""
-
 import argparse
 import logging
 import os

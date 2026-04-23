@@ -58,11 +58,10 @@ def _sample(memmaps, sizes, seq_len):
 def batch_generator(batch_size=32, seq_len=512, split="train"):
     """
     Infinite generator yielding (input, target) batches.
-
-    Args:
-        batch_size: number of sequences per batch
-        seq_len:    tokens per sequence
-        split:      "train" or "val"
+    
+    batch_size: number of sequences per batch
+    seq_len: tokens per sequence
+    split: "train" or "val"
     """
     train_mm, train_sz, val_mm, val_sz = _get_cache()
     memmaps = train_mm if split == "train" else val_mm

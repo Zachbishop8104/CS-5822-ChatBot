@@ -1,16 +1,3 @@
-"""
-finetune_get_data.py
-
-Downloads context-based QA datasets from HuggingFace and formats them as
-[NOTE_QA] blocks. Two completion styles are used:
-
-  Extractive datasets  -> "Answer: {span}"
-  Generative datasets  -> "Explanation: {explanation}"
-
-The mix of both styles teaches the model to sometimes extract and sometimes
-synthesize, with the completion token driving the behavior at inference time.
-"""
-
 from datasets import load_dataset
 from pathlib import Path
 import re
@@ -32,7 +19,6 @@ MAX_ANSWER_WORDS  = 40   # cap ELI5 answers so they don't ramble
 # (hf_dataset_name, config_or_None, split, output_file, n_samples, completion_style)
 # completion_style: "answer" -> "Answer:" | "explain" -> "Explanation:"
 SOURCES = [
-    # Extractive — good for grounding
     ("squad_v2",      None,          "train", "squad.txt",        15_000, "answer"),
     ("narrativeqa",   None,          "train", "narrativeqa.txt",   8_000, "answer"),
     ("newsqa",        None,          "train", "newsqa.txt",        8_000, "answer"),
@@ -45,9 +31,7 @@ ACTIVE_QA_FILES = [out_file for _, _, _, out_file, _, _ in SOURCES]
 ACTIVE_QA_FILES.append("eli5_noteqa.txt")  # Kaggle ELI5 processed separately
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _clean(text) -> str:
     if not isinstance(text, str):
@@ -76,9 +60,7 @@ def _trim_answer(answer: str, max_words: int = MAX_ANSWER_WORDS) -> str:
     return trimmed + "."
 
 
-# ---------------------------------------------------------------------------
 # Per-dataset extractors  ->  (context, question, answer) or None
-# ---------------------------------------------------------------------------
 
 def _extract(ex, dataset: str):
 
@@ -192,9 +174,7 @@ def _extract(ex, dataset: str):
     return None
 
 
-# ---------------------------------------------------------------------------
-# Format a single block — completion style varies by dataset
-# ---------------------------------------------------------------------------
+# Format a single block
 
 def _format_block(context: str, question: str, answer: str,
                   style: str = "answer") -> str:
@@ -209,9 +189,7 @@ def _format_block(context: str, question: str, answer: str,
     )
 
 
-# ---------------------------------------------------------------------------
 # Main download + write
-# ---------------------------------------------------------------------------
 
 def dump_qa_bulk():
     for name, config, split, out_file, n_samples, style in SOURCES:
@@ -259,9 +237,7 @@ def dump_qa_bulk():
     print("\nDone.")
 
 
-# ---------------------------------------------------------------------------
 # Loader used by finetune.py
-# ---------------------------------------------------------------------------
 
 def load_all_qa_blocks(source_files=None) -> list[str]:
     if source_files is None:

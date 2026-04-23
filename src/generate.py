@@ -144,15 +144,15 @@ if __name__ == "__main__":
     import time
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint",         default=DEFAULT_CHECKPOINT)
-    parser.add_argument("--username",           type=str, default=None, help="Username (notes folder)")
-    parser.add_argument("--prompt",             type=str, default=None, help="Single prompt (non-interactive)")
-    parser.add_argument("--max_new_tokens",     type=int,   default=200)
-    parser.add_argument("--temperature",        type=float, default=0.8)
-    parser.add_argument("--top_k",             type=int,   default=50)
-    parser.add_argument("--top_p",             type=float, default=0.92)
+    parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
+    parser.add_argument("--username", type=str, default=None, help="Username (notes folder)")
+    parser.add_argument("--prompt", type=str, default=None, help="Single prompt (non-interactive)")
+    parser.add_argument("--max_new_tokens", type=int, default=200)
+    parser.add_argument("--temperature", type=float, default=0.8)
+    parser.add_argument("--top_k", type=int, default=50)
+    parser.add_argument("--top_p", type=float, default=0.92)
     parser.add_argument("--repetition_penalty", type=float, default=1.3)
-    parser.add_argument("--debug",              action="store_true")
+    parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
     if not args.username:

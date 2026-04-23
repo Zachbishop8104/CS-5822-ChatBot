@@ -9,14 +9,12 @@ from collections import Counter
 
 USERS_DIR = Path(__file__).parent.parent / "users"
 
-CHUNK_SIZE   = 90    # words per chunk
+CHUNK_SIZE = 90    # words per chunk
 CHUNK_STRIDE = 40    # overlap between chunks (50% overlap)
 MIN_CHUNK_WORDS = 15 # discard very short chunks
 
 
-# ---------------------------------------------------------------------------
 # Text utilities
-# ---------------------------------------------------------------------------
 
 def _tokenize(text: str) -> list[str]:
     """Lowercase alphabetic tokens, 2+ chars (removes stopwords implicitly via IDF)."""
@@ -36,7 +34,7 @@ def _preprocess(text: str) -> str:
             continue
         # Strip leading bullet characters
         line = re.sub(r'^[•\-\*]\s*', '', line).strip()
-        # Skip short lines — slide titles, section headers, lone words
+        # Skip short lines -
         if len(line.split()) < 5:
             continue
         cleaned.append(line)
@@ -143,7 +141,7 @@ def retrieve_context(
     query_tokens = _tokenize(question)
 
     if not query_tokens:
-        # No meaningful tokens in the question — return the first chunk as fallback
+        # No meaningful tokens in the question - return the first chunk as fallback
         return all_chunks[0][:max_chars]
 
     # Score every chunk
@@ -165,10 +163,6 @@ def retrieve_context(
 
 
 def format_prompt(username: str, question: str) -> str:
-    """
-    Build the [NOTE_QA] prompt ready to pass to generate().
-    Falls back to a bare [NOTE_QA] block if no context is found.
-    """
     context = retrieve_context(username, question)
     if context:
         return (
@@ -184,9 +178,7 @@ def format_prompt(username: str, question: str) -> str:
         )
 
 
-# ---------------------------------------------------------------------------
-# CLI — quick test without the full model
-# ---------------------------------------------------------------------------
+# CLI - quick tests
 
 if __name__ == "__main__":
     import argparse
