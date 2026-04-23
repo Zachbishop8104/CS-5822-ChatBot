@@ -2,7 +2,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import subprocess
-import tempfile
 import os
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,41 +23,48 @@ app.add_middleware(
 class GenerateRequest(BaseModel):
     prompt: str
     model_file_name: str = "Model_finetuned_best.pth"
-    context: str = ""
-    instruction: str = ""
-    temperature: float = 0.1
-    top_k: int = 10
-    repetition_penalty: float = 1.3
+    temperature: float = 0.01          # Updated default to greedy decoding
+    top_k: int = 50                    # Matched generate.py default
+    top_p: float = 0.92                # Matched generate.py default
+    repetition_penalty: float = 1.0    # Updated default to allow quoting
     max_new_tokens: int = 80
-    prepend_bos: bool = False
-    auto_grounding: bool = True
-    polish_grounded_answers: bool = True
-    rewrite_temperature: float = 0.2
-    rewrite_top_k: int = 20
-    rewrite_max_new_tokens: int = 70
-    grounding_sentences: int = 3
-    debug_grounding: bool = False
-    user_id: str = "default"
+    user_id: str = "default"           # Required for retrieval!
     selected_note_files: list[str] = Field(default_factory=list)
 
 @app.post("/generate")
 async def generate(req: GenerateRequest):
     args = [
-        "python", "generate.py",
+        "python", "generate.py", # Make sure this path points to generate.py
         "--prompt", req.prompt,
+        "--username", req.user_id,   # CRITICAL: Added the username argument
         "--checkpoint", req.model_file_name,
         "--temperature", str(req.temperature),
         "--top_k", str(req.top_k),
+        "--top_p", str(req.top_p),
         "--max_new_tokens", str(req.max_new_tokens),
         "--repetition_penalty", str(req.repetition_penalty),
         "--debug"
     ]
 
     # Run the generate.py script and capture output
-    proc = subprocess.run(args, capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__)))
+    proc = subprocess.run(
+        args, 
+        capture_output=True, 
+        text=True, 
+        cwd=os.path.dirname(os.path.abspath(__file__))
+    )
+    
+    # stdout contains purely the generated text
     response = proc.stdout.strip()
+    
+    # stderr contains the tokenizer info and all [DEBUG] lines
     debug = proc.stderr.strip()
-    return JSONResponse({"response": response, "debug": debug, "returncode": proc.returncode})
+    
+    return JSONResponse({
+        "response": response, 
+        "debug": debug, 
+        "returncode": proc.returncode
+    })
 
 
 @app.get("/notes/{user_id}")

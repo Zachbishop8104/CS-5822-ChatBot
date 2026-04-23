@@ -1,3 +1,16 @@
+"""
+finetune_get_data.py
+
+Downloads context-based QA datasets from HuggingFace and formats them as
+[NOTE_QA] blocks. Two completion styles are used:
+
+  Extractive datasets  -> "Answer: {span}"
+  Generative datasets  -> "Explanation: {explanation}"
+
+The mix of both styles teaches the model to sometimes extract and sometimes
+synthesize, with the completion token driving the behavior at inference time.
+"""
+
 from datasets import load_dataset
 from pathlib import Path
 import re
@@ -14,18 +27,22 @@ QA_DIR.mkdir(parents=True, exist_ok=True)
 
 MIN_ANSWER_WORDS  = 5
 MIN_CONTEXT_WORDS = 20
+MAX_ANSWER_WORDS  = 40   # cap ELI5 answers so they don't ramble
 
-# (hf_dataset_name, config_or_None, split, output_file, n_samples)
+# (hf_dataset_name, config_or_None, split, output_file, n_samples, completion_style)
+# completion_style: "answer" -> "Answer:" | "explain" -> "Explanation:"
 SOURCES = [
-    ("squad_v2",    None,          "train", "squad.txt",        15_000),
-    ("narrativeqa", None,          "train", "narrativeqa.txt",   8_000),
-    ("newsqa",      None,          "train", "newsqa.txt",        8_000),
-    ("hotpot_qa",   "distractor",  "train", "hotpotqa.txt",     10_000),
-    ("pubmed_qa",   "pqa_labeled", "train", "pubmed_qa.txt",     1_000),
-    ("ms_marco",    "v1.1",        "train", "ms_marco.txt",     12_000),
+    # Extractive — good for grounding
+    ("squad_v2",      None,          "train", "squad.txt",        15_000, "answer"),
+    ("narrativeqa",   None,          "train", "narrativeqa.txt",   8_000, "answer"),
+    ("newsqa",        None,          "train", "newsqa.txt",        8_000, "answer"),
+    ("hotpot_qa",     "distractor",  "train", "hotpotqa.txt",     10_000, "answer"),
+    ("pubmed_qa",     "pqa_labeled", "train", "pubmed_qa.txt",     1_000, "answer"),
+    ("ms_marco",      "v1.1",        "train", "ms_marco.txt",     12_000, "answer"),
 ]
 
-ACTIVE_QA_FILES = [out_file for _, _, _, out_file, _ in SOURCES]
+ACTIVE_QA_FILES = [out_file for _, _, _, out_file, _, _ in SOURCES]
+ACTIVE_QA_FILES.append("eli5_noteqa.txt")  # Kaggle ELI5 processed separately
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +61,19 @@ def _truncate(text: str, max_words: int = 120) -> str:
     if len(words) <= max_words:
         return text
     return " ".join(words[:max_words]) + "..."
+
+
+def _trim_answer(answer: str, max_words: int = MAX_ANSWER_WORDS) -> str:
+    """Trim answer to max_words, ending at a sentence boundary if possible."""
+    words = answer.split()
+    if len(words) <= max_words:
+        return answer
+    trimmed = " ".join(words[:max_words])
+    # Try to end at last sentence boundary
+    last_period = max(trimmed.rfind("."), trimmed.rfind("!"), trimmed.rfind("?"))
+    if last_period > len(trimmed) // 2:
+        return trimmed[:last_period + 1]
+    return trimmed + "."
 
 
 # ---------------------------------------------------------------------------
@@ -137,20 +167,45 @@ def _extract(ex, dataset: str):
             return None
         return context, question, answer
 
+    elif dataset == "eli5_category":
+        question   = _clean(ex.get("title", ""))
+        # Use the selftext as context if available, otherwise first document
+        context    = _clean(ex.get("selftext", ""))
+        if not context or len(context.split()) < MIN_CONTEXT_WORDS:
+            docs    = ex.get("documents", [])
+            context = _clean(docs[0]) if docs else ""
+        # Pick highest scored answer
+        answers    = ex.get("answers", {})
+        ans_texts  = answers.get("text", [])  if isinstance(answers, dict) else []
+        ans_scores = answers.get("score", []) if isinstance(answers, dict) else []
+        if not ans_texts:
+            return None
+        if ans_scores and len(ans_scores) == len(ans_texts):
+            best   = max(range(len(ans_texts)), key=lambda i: ans_scores[i])
+            answer = _clean(ans_texts[best])
+        else:
+            answer = _clean(ans_texts[0])
+        # Trim long ELI5 answers to a readable length
+        answer = _trim_answer(answer, MAX_ANSWER_WORDS)
+        return context, question, answer
+
     return None
 
 
 # ---------------------------------------------------------------------------
-# Format a single block
+# Format a single block — completion style varies by dataset
 # ---------------------------------------------------------------------------
 
-def _format_block(context: str, question: str, answer: str) -> str:
-    context = _truncate(context, max_words=120)
+def _format_block(context: str, question: str, answer: str,
+                  style: str = "answer") -> str:
+    context    = _truncate(context, max_words=120)
+    completion = (
+        "Explanation" if style == "explain" else "Answer"
+    )
     return (
-        f"[NOTE_QA]\n"
         f"Context: {context}\n"
         f"Question: {question}\n"
-        f"Answer: {answer}\n"
+        f"{completion}: {answer}\n"
     )
 
 
@@ -159,8 +214,8 @@ def _format_block(context: str, question: str, answer: str) -> str:
 # ---------------------------------------------------------------------------
 
 def dump_qa_bulk():
-    for name, config, split, out_file, n_samples in SOURCES:
-        print(f"\nProcessing {name} ({'default' if config is None else config})...")
+    for name, config, split, out_file, n_samples, style in SOURCES:
+        print(f"\nProcessing {name} ({'default' if config is None else config}) [{style}]...")
         kwargs = {"streaming": True}
         if config:
             kwargs["name"] = config
@@ -193,7 +248,7 @@ def dump_qa_bulk():
                     skipped += 1
                     continue
 
-                f.write(_format_block(context, question, answer))
+                f.write(_format_block(context, question, answer, style))
                 f.write("\n")
                 count += 1
                 if count >= n_samples:

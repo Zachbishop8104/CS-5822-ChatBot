@@ -6,7 +6,6 @@ Use this when you want the shortest path from setup to a working model.
 
 ```bash
 source ~/venv/bin/activate
-cd ~/CS-5822-ChatBot/src
 python tokenizer.py --test
 nohup python -u train.py --force > ../training.log 2>&1 &
 tail -f ../training.log
@@ -16,7 +15,7 @@ After pretraining completes:
 
 ```bash
 python finetune_get_data.py
-nohup python -u finetune.py --model_file_name Model_best.pth --steps 5000 --batch_size 32 --seq_len 256 --lr 2e-5 --eval_interval 250 --val_ratio 0.05 > ../finetune.log 2>&1 &
+nohup python -u finetune.py --model_file_name Model_best.pth --steps 5000 --batch_size 32 --seq_len 512 --lr 2e-5 --eval_interval 250 --val_ratio 0.05 > ../finetune.log 2>&1 &
 tail -f ../finetune.log
 ```
 
@@ -72,15 +71,9 @@ Run in background from `src`:
 nohup python -u train.py --force > ../training.log 2>&1 &
 ```
 
-Monitor:
-
-```bash
-tail -f ../training.log
-```
-
 Expected outputs in `model_state`:
 1. `Model_best.pth`
-2. `Model_final.pth`
+2. `Model_finetuned_best.pth`
 
 ### 5 Fine-Tune on QA Data
 
@@ -97,7 +90,7 @@ nohup python -u finetune.py \
   --model_file_name Model_best.pth \
   --steps 5000 \
   --batch_size 32 \
-  --seq_len 256 \
+  --seq_len 512 \
   --lr 2e-5 \
   --eval_interval 250 \
   --val_ratio 0.05 \
@@ -106,7 +99,6 @@ nohup python -u finetune.py \
 
 Expected outputs in `model_state` after full pipeline:
 1. `Model_best.pth`
-2. `Model_final.pth`
 3. `Model_finetuned_best.pth`
 
 ## Inference and Grounding

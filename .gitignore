@@ -10,3 +10,4 @@ model_state/
 config.js
 users/
 src/generate_old.py
+kaggle/

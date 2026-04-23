@@ -13,7 +13,7 @@
 </head>
 
 <body>
-    <div id="username-modal" style="
+  <div id="username-modal" style="
     position: fixed; inset: 0; z-index: 100;
     background: rgba(0,0,0,0.6);
     display: flex; align-items: center; justify-content: center;
@@ -40,10 +40,11 @@
       </div>
     </div>
   </div>
+  
   <div class="app">
     <header>
       <div class="dot"></div>
-      <div class="title">CS-5822</div>
+      <div class="title">CS-5822 RAG Bot</div>
     </header>
 
     <aside>
@@ -54,31 +55,21 @@
           <input type="text" id="model_file_name" value="Model_finetuned_best.pth" />
         </div>
       </div>
+      
       <div>
-        <div class="section-title">Prompt extras</div>
-        <div class="field">
-          <label>context</label>
-          <input type="text" id="context" placeholder="optional context…" />
-        </div>
-        <div class="field" style="margin-top: 8px">
-          <label>instruction</label>
-          <input type="text" id="instruction" placeholder="optional instruction…" />
-        </div>
-      </div>
-      <div>
-        <div class="section-title">Sampling</div>
+        <div class="section-title">Sampling (RAG Defaults)</div>
         <div class="field">
           <label>temperature</label>
           <div class="range-row">
-            <input type="range" id="temperature" min="0" max="2" step="0.05" value="0.1" />
-            <span class="range-val" id="temperature_val">0.10</span>
+            <input type="range" id="temperature" min="0" max="1" step="0.01" value="0.01" />
+            <span class="range-val" id="temperature_val">0.01</span>
           </div>
         </div>
         <div class="field" style="margin-top: 8px">
           <label>top_k</label>
           <div class="range-row">
-            <input type="range" id="top_k" min="1" max="100" step="1" value="10" />
-            <span class="range-val" id="top_k_val">10</span>
+            <input type="range" id="top_k" min="1" max="100" step="1" value="50" />
+            <span class="range-val" id="top_k_val">50</span>
           </div>
         </div>
         <div class="field" style="margin-top: 8px">
@@ -88,53 +79,15 @@
             <span class="range-val" id="max_new_tokens_val">80</span>
           </div>
         </div>
-        <!--
         <div class="field" style="margin-top: 8px">
-          <label>rewrite_temperature</label>
+          <label>repetition_penalty</label>
           <div class="range-row">
-            <input type="range" id="rewrite_temperature" min="0" max="1" step="0.05" value="0.2" />
-            <span class="range-val" id="rewrite_temperature_val">0.20</span>
+            <input type="range" id="repetition_penalty" min="1.0" max="2.0" step="0.05" value="1.0" />
+            <span class="range-val" id="repetition_penalty_val">1.0</span>
           </div>
-        </div>
-        <div class="field" style="margin-top: 8px">
-          <label>rewrite_top_k</label>
-          <div class="range-row">
-            <input type="range" id="rewrite_top_k" min="1" max="100" step="1" value="20" />
-            <span class="range-val" id="rewrite_top_k_val">20</span>
-          </div>
-        </div>
-        <div class="field" style="margin-top: 8px">
-          <label>rewrite_max_new_tokens</label>
-          <div class="range-row">
-            <input type="range" id="rewrite_max_new_tokens" min="20" max="256" step="10" value="70" />
-            <span class="range-val" id="rewrite_max_new_tokens_val">70</span>
-          </div>
-        </div>
-        -->
-      </div>
-      <div>
-        <div class="section-title">Flags</div>
-        <div class="toggle-row">
-          <span class="toggle-label">prepend_bos</span>
-          <label class="toggle"><input type="checkbox" id="prepend_bos" /><span class="slider"></span></label>
-        </div>
-        <div class="toggle-row" style="margin-top: 8px">
-          <span class="toggle-label">auto_grounding</span>
-          <label class="toggle"><input type="checkbox" id="auto_grounding" checked /><span class="slider"></span></label>
-        </div>
-        <div class="toggle-row" style="margin-top: 8px">
-          <span class="toggle-label">strict_context_grounding</span>
-          <label class="toggle"><input type="checkbox" id="strict_context_grounding" /><span class="slider"></span></label>
-        </div>
-        <div class="toggle-row" style="margin-top: 8px">
-          <span class="toggle-label">debug_grounding</span>
-          <label class="toggle"><input type="checkbox" id="debug_grounding" /><span class="slider"></span></label>
-        </div>
-        <div class="field" style="margin-top: 10px">
-          <label>grounding_sentences</label>
-          <input type="number" id="grounding_sentences" value="3" min="1" max="20" />
         </div>
       </div>
+
       <div>
         <div class="section-title">Class Notes</div>
         <div class="field">
@@ -159,12 +112,12 @@
       <div id="messages">
         <div class="empty" id="empty">
           <div class="glyph">⌘</div>
-          <p>Adjust params · write a prompt · send</p>
+          <p>Ask a question about your notes</p>
         </div>
       </div>
       <div class="input-area">
         <div class="input-row">
-          <textarea id="prompt" placeholder="Enter prompt…" rows="1"></textarea>
+          <textarea id="prompt" placeholder="What is the problem with static embeddings?" rows="1"></textarea>
           <button id="send-btn" title="Send">
             <svg viewBox="0 0 24 24">
               <line x1="22" y1="2" x2="11" y2="13" />
@@ -180,7 +133,7 @@
   </div>
 
   <script>
-    const API_BASE = CONFIG.API_BASE ?? window.location.origin;
+    const API_BASE = typeof CONFIG !== 'undefined' && CONFIG.API_BASE ? CONFIG.API_BASE : window.location.origin;
     const generateEndpoint = `${API_BASE}/generate`;
     const notesEndpoint = `${API_BASE}/notes`;
     const uploadEndpoint = `${API_BASE}/uploadfile/`;
@@ -189,13 +142,16 @@
     const notePickerEl = document.getElementById("note-picker");
     const notesStatusEl = document.getElementById("notes-status");
     let availableNotes = [];
+    let currentUser = null;
 
     document.addEventListener("DOMContentLoaded", function () {
-      ["temperature", "top_k", "max_new_tokens"].forEach((id) => {
+      ["temperature", "top_k", "max_new_tokens", "repetition_penalty"].forEach((id) => {
         const el = document.getElementById(id);
         const vl = document.getElementById(id + "_val");
-        const fmt = id === "temperature" ? (v) => parseFloat(v).toFixed(2) : (v) => v;
-        el.addEventListener("input", () => (vl.textContent = fmt(el.value)));
+        const fmt = (id === "temperature" || id === "repetition_penalty") ? (v) => parseFloat(v).toFixed(2) : (v) => v;
+        if(el && vl) {
+            el.addEventListener("input", () => (vl.textContent = fmt(el.value)));
+        }
       });
 
       promptEl.addEventListener("input", () => {
@@ -209,6 +165,9 @@
         }
       });
       document.getElementById("send-btn").addEventListener("click", send);
+      
+      initUsernameGate();
+      setUploadButtonState();
     });
 
     function esc(s) {
@@ -217,6 +176,7 @@
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
     }
+    
     const msgsEl = document.getElementById("messages");
 
     function addMsg(role, text) {
@@ -229,11 +189,12 @@
       msgsEl.scrollTop = msgsEl.scrollHeight;
     }
 
+    // Displays the stderr output (including the [DEBUG] prompt) in a collapsible dropdown
     function addDebug(stderr) {
       if (!stderr) return;
       const det = document.createElement("details");
       det.className = "msg-debug";
-      det.innerHTML = `<summary>stderr / debug</summary>\n${esc(stderr)}`;
+      det.innerHTML = `<summary>View Debug Logs & Prompt Info</summary>\n<pre style="white-space: pre-wrap; margin-top: 8px; font-size: 11px;">${esc(stderr)}</pre>`;
       msgsEl.appendChild(det);
       msgsEl.scrollTop = msgsEl.scrollHeight;
     }
@@ -255,19 +216,9 @@
         temperature: parseFloat(document.getElementById("temperature").value),
         top_k: parseInt(document.getElementById("top_k").value),
         max_new_tokens: parseInt(document.getElementById("max_new_tokens").value),
-        // The following are commented out as they are not used in the new generate.py
-        // context: document.getElementById("context").value.trim(),
-        // instruction: document.getElementById("instruction").value.trim(),
-        // rewrite_temperature: parseFloat(document.getElementById("rewrite_temperature").value),
-        // rewrite_top_k: parseInt(document.getElementById("rewrite_top_k").value),
-        // rewrite_max_new_tokens: parseInt(document.getElementById("rewrite_max_new_tokens").value),
-        // prepend_bos: document.getElementById("prepend_bos").checked,
-        // auto_grounding: document.getElementById("auto_grounding").checked,
-        // grounding_sentences: parseInt(document.getElementById("grounding_sentences").value),
-        // debug_grounding: document.getElementById("debug_grounding").checked,
+        repetition_penalty: parseFloat(document.getElementById("repetition_penalty").value),
         user_id: currentUser,
-        // strict_context_grounding: document.getElementById("strict_context_grounding").checked,
-        // selected_note_files: getSelectedNotes(),
+        selected_note_files: getSelectedNotes(),
       };
     }
 
@@ -302,7 +253,6 @@
       notesStatusEl.textContent = "Loading notes…";
       try {
         const endpoint = `${notesEndpoint}/${encodeURIComponent(currentUser)}`;
-        console.log("Fetching notes from", endpoint);
         const res = await fetch(endpoint);
         const data = await res.json();
         renderNotes(data.notes || []);
@@ -311,12 +261,9 @@
       }
     }
 
-
-    let currentUser = null;
-
     function setUploadButtonState() {
       const uploadBtn = document.getElementById("upload-btn");
-      uploadBtn.disabled = !currentUser;
+      if(uploadBtn) uploadBtn.disabled = !currentUser;
     }
 
     function initUsernameGate() {
@@ -339,11 +286,6 @@
       input.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
     }
 
-    document.addEventListener("DOMContentLoaded", () => {
-      initUsernameGate();
-      setUploadButtonState();
-    });
-
     async function send() {
       const params = getParams();
       if (!params.prompt) return;
@@ -361,17 +303,18 @@
           body: JSON.stringify(params),
         });
         const data = await res.json();
-        console.log("Response data:", data);
         typing.remove();
 
         if (!res.ok) {
           addMsg("err", data.detail || `HTTP ${res.status}`);
         } else if (data.returncode !== 0) {
-          addMsg("err", data.response || "Script exited with non-zero code.");
+          addMsg("err", data.response || "Script exited with non-zero code. Check debug dropdown.");
           addDebug(data.debug);
         } else {
+          // data.response contains the pure stdout (the generated text)
           addMsg("bot", data.response);
-          addDebug(data.debug); // only visible if user expands the dropdown
+          // data.debug contains the stderr (the [DEBUG] logs + tokenizer info)
+          addDebug(data.debug); 
         }
       } catch (e) {
         typing.remove();

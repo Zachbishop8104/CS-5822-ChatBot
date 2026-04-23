@@ -9,8 +9,8 @@ from collections import Counter
 
 USERS_DIR = Path(__file__).parent.parent / "users"
 
-CHUNK_SIZE   = 100   # words per chunk
-CHUNK_STRIDE = 50    # overlap between chunks (50% overlap)
+CHUNK_SIZE   = 90    # words per chunk
+CHUNK_STRIDE = 40    # overlap between chunks (50% overlap)
 MIN_CHUNK_WORDS = 15 # discard very short chunks
 
 
@@ -106,7 +106,7 @@ def retrieve_context(
     username: str,
     question: str,
     top_k: int    = 2,
-    max_chars: int = 400,
+    max_chars: int = 1000,
 ) -> str:
     """
     Return the most relevant note chunk(s) for a question.
@@ -154,14 +154,6 @@ def retrieve_context(
         reverse=True,
     )
 
-    query_set = set(query_tokens)
-    boosted = []
-    for score, chunk in scored:
-        chunk_words = set(_tokenize(chunk))
-        overlap = len(query_set & chunk_words)
-        boosted.append((score + overlap * 0.1, chunk))
-    boosted.sort(reverse=True, key=lambda x: x[0])
-
     # Take top_k prose chunks, join with separator, trim to max_chars
     prose_chunks = [chunk for _, chunk in scored if _is_prose(chunk)]
     # Fall back to top scored if nothing passes the prose filter
@@ -180,15 +172,12 @@ def format_prompt(username: str, question: str) -> str:
     context = retrieve_context(username, question)
     if context:
         return (
-            f"[NOTE_QA]\n"
             f"Context: {context}\n"
             f"Question: {question}\n"
             f"Answer:"
         )
     else:
-        # No notes found — model will have to answer from its own knowledge
         return (
-            f"[NOTE_QA]\n"
             f"Context: No relevant notes found.\n"
             f"Question: {question}\n"
             f"Answer:"

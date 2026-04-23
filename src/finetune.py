@@ -1,5 +1,4 @@
 # finetune.py
-# Fine-tunes the pretrained model on context-based [NOTE_QA] QA pairs.
 # The model only learns to predict the answer tokens — prompt tokens are masked.
 
 import torch
@@ -12,9 +11,21 @@ import numpy as np
 import argparse
 from torch import amp
 from torch.optim.lr_scheduler import LambdaLR
+import math
 
 MODEL_DIR = Path(__file__).parent.parent / "model_state"
 
+
+def _make_lr_lambda(steps: int, warmup: int):
+    warmup = max(1, warmup)
+    steps  = max(2, steps)
+    def _fn(step):
+        if step < warmup:
+            return step / warmup
+        progress = (step - warmup) / max(1, steps - warmup)
+        progress = min(max(progress, 0.0), 1.0)
+        return 0.5 * (1 + math.cos(math.pi * progress))
+    return _fn
 
 # ---------------------------------------------------------------------------
 # Checkpoint helpers
@@ -34,8 +45,11 @@ def _normalize_state_dict(state_dict: dict) -> dict:
 def load_qa_pairs(val_ratio: float = 0.05):
     """
     Parse [NOTE_QA] blocks into (prompt, answer) pairs.
-    prompt  = everything up to and including 'Answer:'
-    answer  = the text that follows 'Answer:'
+    Handles two completion styles:
+      "Answer: {text}"
+      "Explanation: {text}"
+    prompt = everything up to and including the completion token
+    answer = the text that follows it
     """
     examples = load_all_qa_blocks()
     if len(examples) < 2:
@@ -44,19 +58,28 @@ def load_qa_pairs(val_ratio: float = 0.05):
             "Run `python finetune_get_data.py` first to download data."
         )
 
+    # Ordered longest-first so rfind picks the most specific match
+    COMPLETION_TOKENS = [
+        "Explanation:",
+        "Answer:",
+    ]
+
     pairs = []
     skipped = 0
     for block in examples:
-        idx = block.rfind("Answer:")
-        if idx == -1:
-            skipped += 1
-            continue
-        prompt = block[:idx + len("Answer:")].strip()   # include the "Answer:" token
-        answer = block[idx + len("Answer:"):].strip()
-        answer = answer.split("\n\n")[0].strip()        # stop at first blank line
-        if prompt and answer:
-            pairs.append((prompt, answer))
-        else:
+        matched = False
+        for token in COMPLETION_TOKENS:
+            idx = block.rfind(token)
+            if idx == -1:
+                continue
+            prompt = block[:idx + len(token)].strip()
+            answer = block[idx + len(token):].strip()
+            answer = answer.split("\n\n")[0].strip()
+            if prompt and answer:
+                pairs.append((prompt, answer))
+                matched = True
+            break
+        if not matched:
             skipped += 1
 
     if skipped:
@@ -100,10 +123,15 @@ def get_batch(pairs, tok, batch_size: int, seq_len: int, bos_id, eos_id):
         if total > seq_len:
             budget = seq_len - len(answer_ids)
             if budget > 0:
-                prompt_ids = prompt_ids[-budget:]
+                # Keep the start (Context: [text]) AND the end (... Question: [q] Explanation:)
+                # We reserve the last 40 tokens for the question/trigger, and use the rest for context.
+                tail_len = min(40, budget)
+                head_len = budget - tail_len
+                prompt_ids = prompt_ids[:head_len] + prompt_ids[-tail_len:]
             else:
+                # Fallback if the answer alone exceeds seq_len (rare with your dataset)
                 prompt_ids = []
-                answer_ids = answer_ids[-seq_len:]
+                answer_ids = answer_ids[:seq_len]
 
         ids  = prompt_ids + answer_ids
         mask = [0] * len(prompt_ids) + [1] * len(answer_ids)
@@ -131,7 +159,7 @@ def finetune(
     model_file_name: str,
     steps: int       = 9_000,
     batch_size: int  = 32,
-    seq_len: int     = 256,
+    seq_len: int     = 512,
     lr: float        = 1e-5,
     eval_interval: int       = 200,
     val_ratio: float         = 0.05,
@@ -173,7 +201,7 @@ def finetune(
     # -- Optimiser & scheduler --
     WARMUP    = 500
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    scheduler = LambdaLR(optimizer, lambda s: min(1.0, s / WARMUP))
+    scheduler = LambdaLR(optimizer, _make_lr_lambda(steps, WARMUP))
     loss_fn   = nn.CrossEntropyLoss()
     scaler    = amp.GradScaler(enabled=(device.type == "cuda"))
 
