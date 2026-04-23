@@ -1,5 +1,10 @@
 ## CS-5822 RAG
 
+Virtual environment
+```bash
+source ~/venv/bin/activate
+```
+
 FastAPI server for the web UI. Wraps `generate.py` as a subprocess and handles note management.
 
 ```bash

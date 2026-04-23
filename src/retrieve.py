@@ -1,7 +1,3 @@
-# retrieve.py
-# Finds the most relevant chunk(s) from a user's notes for a given question
-# using TF-IDF scoring. No external dependencies beyond the standard library.
-
 import re
 import math
 from pathlib import Path
@@ -9,10 +5,12 @@ from collections import Counter
 
 USERS_DIR = Path(__file__).parent.parent / "users"
 
-CHUNK_SIZE = 90    # words per chunk
-CHUNK_STRIDE = 40    # overlap between chunks (50% overlap)
+CHUNK_SIZE = 150 # words per chunk
+CHUNK_STRIDE = 75 # overlap between chunks (50% overlap)
 MIN_CHUNK_WORDS = 15 # discard very short chunks
 
+# Finds the most relevant chunk(s) from a user's notes for a given question
+# using TF-IDF scoring. No external dependencies beyond the standard library.
 
 # Text utilities
 
@@ -43,10 +41,7 @@ def _preprocess(text: str) -> str:
 
 def _is_prose(chunk: str, min_ratio: float = 0.6) -> bool:
     """
-    Return True if the chunk looks like readable prose rather than
-    diagram notation, math symbols, or slide labels.
-    A chunk passes if at least min_ratio of its tokens are real words
-    (3+ alphabetic characters).
+    Return True if the chunk looks readable 
     """
     words = chunk.split()
     if not words:
@@ -68,9 +63,7 @@ def _chunk_text(text: str) -> list[str]:
     return chunks
 
 
-# ---------------------------------------------------------------------------
 # TF-IDF scoring
-# ---------------------------------------------------------------------------
 
 def _build_doc_freqs(tokenized_chunks: list[list[str]]) -> dict[str, int]:
     """Count how many chunks contain each token."""
@@ -96,28 +89,14 @@ def _tfidf_score(
     return score
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
 
 def retrieve_context(
     username: str,
     question: str,
-    top_k: int    = 2,
-    max_chars: int = 1000,
+    top_k: int = 1,
+    max_chars: int = 1500,
 ) -> str:
-    """
-    Return the most relevant note chunk(s) for a question.
-
-    Args:
-        username:  folder name under USERS_DIR
-        question:  the student's question string
-        top_k:     number of top chunks to concatenate
-        max_chars: hard character limit on returned context
-
-    Returns:
-        A single string of context, or "" if no notes found.
-    """
     user_dir = USERS_DIR / username
     if not user_dir.exists():
         print(f"[retrieve] No notes folder found for user '{username}' at {user_dir}")
