@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 import os
 from dotenv import load_dotenv
+import random
 
 load_dotenv()
 hf_token = os.getenv("HF_TOKEN")
@@ -174,11 +175,35 @@ def _extract(ex, dataset: str):
     return None
 
 
+def _corrupt_for_slides(text: str, corruption_chance: float = 0.5) -> str:
+    """Randomly formats pristine text to look like notes."""
+    if random.random() > corruption_chance:
+        return text 
+
+    words = text.split()
+    corrupted = []
+    
+    for i, word in enumerate(words):
+        # Strip punctuation randomly
+        if random.random() < 0.5:
+            word = word.replace(".", "").replace(",", "").replace(";", "")
+            
+        corrupted.append(word)
+        
+        if random.random() < 0.15 and i < len(words) - 1:
+            corrupted.append("\n")
+
+    # Join back together and clean up spacing around the newlines
+    result = " ".join(corrupted)
+    result = result.replace(" \n ", "\n").replace("\n - ", "\n- ")
+    return result.strip()
+
 # Format a single block
 
-def _format_block(context: str, question: str, answer: str,
-                  style: str = "answer") -> str:
-    context    = _truncate(context, max_words=120)
+def _format_block(context: str, question: str, answer: str, style: str = "answer") -> str:
+    context = _corrupt_for_slides(context)
+    
+    context = _truncate(context, max_words=120)
     completion = (
         "Explanation" if style == "explain" else "Answer"
     )
